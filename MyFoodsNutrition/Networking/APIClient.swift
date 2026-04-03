@@ -1,6 +1,6 @@
 import Foundation
 
-/// Talks to PHP API: `POST {base}/sync/push`, `GET {base}/sync/pull?since_id=`.
+/// Talks to PHP API: `POST {base}/sync/push.php`, `GET {base}/sync/pull.php?since_id=`.
 final class APIClient {
     var config: APIConfig
     private let session: URLSession
@@ -12,7 +12,7 @@ final class APIClient {
 
     func push(operations: [DailyItemDTO.PushOperation]) async throws -> DailyItemDTO.PushResponse {
         guard config.isConfigured else { throw APIError.notConfigured }
-        guard let url = URL(string: config.baseURL + "/sync/push") else { throw APIError.invalidURL }
+        guard let url = URL(string: config.baseURL + "/sync/push.php") else { throw APIError.invalidURL }
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -29,7 +29,7 @@ final class APIClient {
 
     func pull(sinceId: Int64) async throws -> DailyItemDTO.PullResponse {
         guard config.isConfigured else { throw APIError.notConfigured }
-        var components = URLComponents(string: config.baseURL + "/sync/pull")
+        var components = URLComponents(string: config.baseURL + "/sync/pull.php")
         components?.queryItems = [URLQueryItem(name: "since_id", value: String(sinceId))]
         guard let url = components?.url else { throw APIError.invalidURL }
 

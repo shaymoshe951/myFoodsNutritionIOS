@@ -1,0 +1,414 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		BF0001 /* MyFoodsNutritionApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = FR0001 /* MyFoodsNutritionApp.swift */; };
+		BF0002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FR0002 /* ContentView.swift */; };
+		BF0003 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FR0003 /* AppModel.swift */; };
+		BF0004 /* DailyItemDTO.swift in Sources */ = {isa = PBXBuildFile; fileRef = FR0004 /* DailyItemDTO.swift */; };
+		BF0005 /* DailyItemRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = FR0005 /* DailyItemRecord.swift */; };
+		BF0006 /* Migrations.swift in Sources */ = {isa = PBXBuildFile; fileRef = FR0006 /* Migrations.swift */; };
+		BF0007 /* AppDatabase.swift in Sources */ = {isa = PBXBuildFile; fileRef = FR0007 /* AppDatabase.swift */; };
+		BF0008 /* APIConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = FR0008 /* APIConfig.swift */; };
+		BF0009 /* APIError.swift in Sources */ = {isa = PBXBuildFile; fileRef = FR0009 /* APIError.swift */; };
+		BF0010 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = FR0010 /* APIClient.swift */; };
+		BF0011 /* SyncEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = FR0011 /* SyncEngine.swift */; };
+		BF0012 /* NetworkPathMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = FR0012 /* NetworkPathMonitor.swift */; };
+		BF0013 /* DailyDiaryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FR0013 /* DailyDiaryView.swift */; };
+		BF0014 /* DailyDiaryViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FR0014 /* DailyDiaryViewModel.swift */; };
+		BF0015 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FR0015 /* SettingsView.swift */; };
+		BF0016 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = FR0016 /* Assets.xcassets */; };
+		BF0017 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = PKG001 /* GRDB */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		FR0001 /* MyFoodsNutritionApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MyFoodsNutritionApp.swift; sourceTree = "<group>"; };
+		FR0002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		FR0003 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
+		FR0004 /* DailyItemDTO.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DailyItemDTO.swift; sourceTree = "<group>"; };
+		FR0005 /* DailyItemRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DailyItemRecord.swift; sourceTree = "<group>"; };
+		FR0006 /* Migrations.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Migrations.swift; sourceTree = "<group>"; };
+		FR0007 /* AppDatabase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDatabase.swift; sourceTree = "<group>"; };
+		FR0008 /* APIConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIConfig.swift; sourceTree = "<group>"; };
+		FR0009 /* APIError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIError.swift; sourceTree = "<group>"; };
+		FR0010 /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
+		FR0011 /* SyncEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncEngine.swift; sourceTree = "<group>"; };
+		FR0012 /* NetworkPathMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkPathMonitor.swift; sourceTree = "<group>"; };
+		FR0013 /* DailyDiaryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DailyDiaryView.swift; sourceTree = "<group>"; };
+		FR0014 /* DailyDiaryViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DailyDiaryViewModel.swift; sourceTree = "<group>"; };
+		FR0015 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		FR0016 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		PR0001 /* MyFoodsNutrition.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MyFoodsNutrition.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		FW0001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				BF0017 /* GRDB in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		GR0001 = {
+			isa = PBXGroup;
+			children = (
+				GR0002 /* MyFoodsNutrition */,
+				GR0003 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		GR0002 /* MyFoodsNutrition */ = {
+			isa = PBXGroup;
+			children = (
+				FR0001 /* MyFoodsNutritionApp.swift */,
+				FR0002 /* ContentView.swift */,
+				FR0003 /* AppModel.swift */,
+				GR0004 /* Models */,
+				GR0005 /* Persistence */,
+				GR0006 /* Networking */,
+				GR0007 /* Sync */,
+				GR0008 /* Services */,
+				GR0009 /* Features */,
+				GR0010 /* Resources */,
+			);
+			path = MyFoodsNutrition;
+			sourceTree = "<group>";
+		};
+		GR0003 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				PR0001 /* MyFoodsNutrition.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		GR0004 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				FR0004 /* DailyItemDTO.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		GR0005 /* Persistence */ = {
+			isa = PBXGroup;
+			children = (
+				FR0005 /* DailyItemRecord.swift */,
+				FR0006 /* Migrations.swift */,
+				FR0007 /* AppDatabase.swift */,
+			);
+			path = Persistence;
+			sourceTree = "<group>";
+		};
+		GR0006 /* Networking */ = {
+			isa = PBXGroup;
+			children = (
+				FR0008 /* APIConfig.swift */,
+				FR0009 /* APIError.swift */,
+				FR0010 /* APIClient.swift */,
+			);
+			path = Networking;
+			sourceTree = "<group>";
+		};
+		GR0007 /* Sync */ = {
+			isa = PBXGroup;
+			children = (
+				FR0011 /* SyncEngine.swift */,
+			);
+			path = Sync;
+			sourceTree = "<group>";
+		};
+		GR0008 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				FR0012 /* NetworkPathMonitor.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		GR0009 /* Features */ = {
+			isa = PBXGroup;
+			children = (
+				GR0011 /* Diary */,
+				GR0012 /* Settings */,
+			);
+			path = Features;
+			sourceTree = "<group>";
+		};
+		GR0010 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				FR0016 /* Assets.xcassets */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		GR0011 /* Diary */ = {
+			isa = PBXGroup;
+			children = (
+				FR0013 /* DailyDiaryView.swift */,
+				FR0014 /* DailyDiaryViewModel.swift */,
+			);
+			path = Diary;
+			sourceTree = "<group>";
+		};
+		GR0012 /* Settings */ = {
+			isa = PBXGroup;
+			children = (
+				FR0015 /* SettingsView.swift */,
+			);
+			path = Settings;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		NT0001 /* MyFoodsNutrition */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = CL0003 /* Build configuration list for PBXNativeTarget "MyFoodsNutrition" */;
+			buildPhases = (
+				SR0001 /* Sources */,
+				FW0001 /* Frameworks */,
+				RS0001 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = MyFoodsNutrition;
+			packageProductDependencies = (
+				PKG001 /* GRDB */,
+			);
+			productName = MyFoodsNutrition;
+			productReference = PR0001 /* MyFoodsNutrition.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		PJ0001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1500;
+				LastUpgradeCheck = 1500;
+				TargetAttributes = {
+					NT0001 = {
+						CreatedOnToolsVersion = 15.0;
+					};
+				};
+			};
+			buildConfigurationList = CL0001 /* Build configuration list for PBXProject "MyFoodsNutrition" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = he;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				he,
+				Base,
+			);
+			mainGroup = GR0001;
+			packageReferences = (
+				PKGREF1 /* XCRemoteSwiftPackageReference "GRDB" */,
+			);
+			productRefGroup = GR0003 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				NT0001 /* MyFoodsNutrition */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		RS0001 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				BF0016 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		SR0001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				BF0001 /* MyFoodsNutritionApp.swift in Sources */,
+				BF0002 /* ContentView.swift in Sources */,
+				BF0003 /* AppModel.swift in Sources */,
+				BF0004 /* DailyItemDTO.swift in Sources */,
+				BF0005 /* DailyItemRecord.swift in Sources */,
+				BF0006 /* Migrations.swift in Sources */,
+				BF0007 /* AppDatabase.swift in Sources */,
+				BF0008 /* APIConfig.swift in Sources */,
+				BF0009 /* APIError.swift in Sources */,
+				BF0010 /* APIClient.swift in Sources */,
+				BF0011 /* SyncEngine.swift in Sources */,
+				BF0012 /* NetworkPathMonitor.swift in Sources */,
+				BF0013 /* DailyDiaryView.swift in Sources */,
+				BF0014 /* DailyDiaryViewModel.swift in Sources */,
+				BF0015 /* SettingsView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		BC0001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ENABLE_MODULES = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		BC0002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ENABLE_MODULES = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+			};
+			name = Release;
+		};
+		BC0003 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = "";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.mydailynutrition.MyFoodsNutrition;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		BC0004 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = "";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.mydailynutrition.MyFoodsNutrition;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		CL0001 /* Build configuration list for PBXProject "MyFoodsNutrition" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				BC0001 /* Debug */,
+				BC0002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		CL0003 /* Build configuration list for PBXNativeTarget "MyFoodsNutrition" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				BC0003 /* Debug */,
+				BC0004 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		PKGREF1 /* XCRemoteSwiftPackageReference "GRDB" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/groue/GRDB.swift.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 6.24.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		PKG001 /* GRDB */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = PKGREF1 /* XCRemoteSwiftPackageReference "GRDB" */;
+			productName = GRDB;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = PJ0001 /* Project object */;
+}

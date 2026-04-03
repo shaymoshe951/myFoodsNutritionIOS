@@ -1,0 +1,20 @@
+# Xcode
+DerivedData/
+build/
+*.xcuserstate
+xcuserdata/
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Swift PM
+.build/
+.swiftpm/
+
+# macOS
+.DS_Store
+
+# Secrets (copy Secrets.example.plist → Secrets.plist in Xcode target)
+Secrets.plist

@@ -3,12 +3,12 @@ import SwiftUI
 struct DailyDiaryView: View {
     @EnvironmentObject private var appModel: AppModel
     @StateObject private var viewModel: DailyDiaryViewModel
-    @State private var newName = ""
-    @State private var newQuantity = "1"
-    @State private var newMeal = ""
-    @State private var newTime = ""
+    @State private var queryLine = ""
     @State private var isSyncingSheet = false
     @State private var syncAlert: String?
+    @State private var submitAlert: String?
+    @State private var editLocalId: Int64?
+    @State private var editQtyText = ""
 
     init(database: AppDatabase) {
         _viewModel = StateObject(wrappedValue: DailyDiaryViewModel(database: database))
@@ -25,27 +25,37 @@ struct DailyDiaryView: View {
                         }
                 }
 
-                Section("פריט חדש") {
-                    TextField("שם מזון", text: $newName)
+                Section {
+                    TextField("מה אכלתם היום?", text: $queryLine)
                         .textFieldStyle(.roundedBorder)
-                    TextField("כמות", text: $newQuantity)
-                        .keyboardType(.numberPad)
-                        .textFieldStyle(.roundedBorder)
-                    TextField("סוג ארוחה (ריק = אוטומטי)", text: $newMeal)
-                        .textFieldStyle(.roundedBorder)
-                    TextField("שעה HH:mm", text: $newTime)
-                        .textFieldStyle(.roundedBorder)
+                        .submitLabel(.done)
+                        .onChange(of: queryLine) { _, new in
+                            viewModel.onFoodQueryChanged(new, api: appModel.apiClient)
+                        }
+                        .onSubmit {
+                            Task { await submitFoodLine() }
+                        }
 
-                    Button("הוסף") {
-                        let qty = Int(newQuantity) ?? 1
-                        let time = newTime.isEmpty ? Self.currentTimeHHmm() : newTime
-                        viewModel.addItem(name: newName, quantity: qty, meal: newMeal, time: time)
-                        newName = ""
-                        newQuantity = "1"
-                        newMeal = ""
-                        newTime = ""
+                    if !viewModel.searchSuggestions.isEmpty {
+                        ForEach(viewModel.searchSuggestions) { item in
+                            Button {
+                                let g = Int(viewModel.searchPreviewGrams.rounded(.towardZero))
+                                queryLine = "\(item.itemName) \(g)"
+                                viewModel.onFoodQueryChanged(queryLine, api: appModel.apiClient)
+                            } label: {
+                                suggestionLabel(item)
+                            }
+                        }
                     }
-                    .disabled(newName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                    Button("הוסף (כמו Enter באתר)") {
+                        Task { await submitFoodLine() }
+                    }
+                    .disabled(queryLine.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                } header: {
+                    Text("חיפוש והוספה")
+                } footer: {
+                    Text("שורה אחת: שם מזון + מספר גרם (למשל «חלב 200»). ארוחה נקבעת אוטומטית לפי שעת ההוספה, כמו בשרת.")
                 }
 
                 Section("פריטים") {
@@ -57,7 +67,10 @@ struct DailyDiaryView: View {
                             if let id = row.id {
                                 DailyItemRow(
                                     row: row,
-                                    onQuantityChange: { q in viewModel.updateQuantity(localId: id, quantity: q) },
+                                    onEdit: {
+                                        editLocalId = id
+                                        editQtyText = String(row.quantity)
+                                    },
                                     onDelete: { viewModel.delete(localId: id) }
                                 )
                             }
@@ -113,19 +126,54 @@ struct DailyDiaryView: View {
             } message: {
                 Text(syncAlert ?? "")
             }
+            .alert("הוספה", isPresented: Binding(
+                get: { submitAlert != nil },
+                set: { if !$0 { submitAlert = nil } }
+            )) {
+                Button("אישור", role: .cancel) { submitAlert = nil }
+            } message: {
+                Text(submitAlert ?? "")
+            }
+            .alert("עריכת כמות [גרם]", isPresented: Binding(
+                get: { editLocalId != nil },
+                set: { if !$0 { editLocalId = nil } }
+            )) {
+                TextField("גרם", text: $editQtyText)
+                    .keyboardType(.numberPad)
+                Button("אישור") {
+                    if let id = editLocalId, let q = Int(editQtyText), q > 0 {
+                        viewModel.updateQuantity(localId: id, quantity: q)
+                    }
+                    editLocalId = nil
+                }
+                Button("ביטול", role: .cancel) { editLocalId = nil }
+            } message: {
+                Text("הזן כמות בגרם")
+            }
             .onAppear {
                 viewModel.load()
             }
         }
     }
 
-    private static func currentTimeHHmm() -> String {
-        let f = DateFormatter()
-        f.calendar = Calendar(identifier: .gregorian)
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.timeZone = TimeZone(identifier: "Asia/Jerusalem")
-        f.dateFormat = "HH:mm"
-        return f.string(from: Date())
+    @ViewBuilder
+    private func suggestionLabel(_ item: FoodSearchItemDTO) -> some View {
+        let g = viewModel.searchPreviewGrams
+        let energy = (item.energy ?? 0) * g / 100.0
+        let line = "\(item.itemName) [\(Int(energy.rounded())) קלוריות ל-\(Int(g.rounded(.towardZero))) גרם]"
+        Text(line)
+            .frame(maxWidth: .infinity, alignment: .trailing)
+    }
+
+    private func submitFoodLine() async {
+        do {
+            try await viewModel.submitFoodQueryLine(queryLine, api: appModel.apiClient)
+            queryLine = ""
+        } catch let e as DiaryEntryError {
+            submitAlert = e.localizedDescription
+        } catch {
+            submitAlert = error.localizedDescription
+        }
     }
 
     private static func formatTime(_ d: Date) -> String {
@@ -139,54 +187,32 @@ struct DailyDiaryView: View {
 
 private struct DailyItemRow: View {
     let row: DailyItemRecord
-    var onQuantityChange: (Int) -> Void
+    var onEdit: () -> Void
     var onDelete: () -> Void
 
-    @State private var qtyText: String
-
-    init(row: DailyItemRecord, onQuantityChange: @escaping (Int) -> Void, onDelete: @escaping () -> Void) {
-        self.row = row
-        self.onQuantityChange = onQuantityChange
-        self.onDelete = onDelete
-        _qtyText = State(initialValue: String(row.quantity))
-    }
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(row.itemName)
-                .font(.headline)
-            HStack {
-                Text(row.mealTimeSlot)
-                Spacer()
-                Text(row.itmTime)
-                    .foregroundStyle(.secondary)
+        HStack(alignment: .center, spacing: 12) {
+            Button(action: onEdit) {
+                Text("\(row.itemName) \(row.quantity) גרם")
+                    .multilineTextAlignment(.trailing)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
             }
-            .font(.subheadline)
+            .buttonStyle(.plain)
 
-            HStack {
-                Text("כמות")
-                TextField("", text: $qtyText)
-                    .keyboardType(.numberPad)
-                    .frame(width: 56)
-                    .textFieldStyle(.roundedBorder)
-                    .onSubmit {
-                        commitQty()
-                    }
-                Button("עדכן") { commitQty() }
-                Spacer()
-                Button(role: .destructive, action: onDelete) {
-                    Image(systemName: "trash")
-                }
+            Button(role: .destructive, action: onDelete) {
+                Image(systemName: "trash")
             }
         }
-        .onChange(of: row.quantity) { _, new in
-            qtyText = String(new)
-        }
-    }
+        .accessibilityElement(children: .combine)
 
-    private func commitQty() {
-        let q = Int(qtyText) ?? row.quantity
-        onQuantityChange(q)
+        HStack {
+            Text(row.mealTimeSlot)
+            Spacer()
+            Text(row.itmTime)
+                .foregroundStyle(.secondary)
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
     }
 }
 

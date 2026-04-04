@@ -40,6 +40,21 @@ final class APIClient {
         return try await perform(request, decode: DailyItemDTO.PullResponse.self)
     }
 
+    /// Same server logic as `findItemDB.php` (Bearer auth).
+    func searchFoods(query: String) async throws -> FoodSearchResponse {
+        guard config.isConfigured else { throw APIError.notConfigured }
+        guard let url = URL(string: config.baseURL + "/search-items.php") else { throw APIError.invalidURL }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(config.token)", forHTTPHeaderField: "Authorization")
+        let body: [String: String] = ["query": query]
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        return try await perform(request, decode: FoodSearchResponse.self)
+    }
+
     private func perform<T: Decodable>(_ request: URLRequest, decode: T.Type) async throws -> T {
         let data: Data
         let response: URLResponse

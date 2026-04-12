@@ -52,32 +52,80 @@ final class APIClient {
         let body: [String: String] = ["query": query]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        return try await perform(request, decode: FoodSearchResponse.self)
+        return try await perform(request, decode: FoodSearchResponse.self, label: "searchFoods")
     }
 
-    private func perform<T: Decodable>(_ request: URLRequest, decode: T.Type) async throws -> T {
+    private func perform<T: Decodable>(_ request: URLRequest, decode: T.Type, label: String) async throws -> T {
+        let typeName = String(describing: T.self)
+        let path = request.url?.path ?? "(no path)"
+        AppLog.api.info("[\(label)] → \(request.httpMethod ?? "?") \(path) decode=\(typeName)")
+
         let data: Data
         let response: URLResponse
         do {
             (data, response) = try await session.data(for: request)
         } catch {
+            AppLog.api.error("[\(label)] transport failed: \(String(describing: error))")
             throw APIError.transport(error)
         }
 
         guard let http = response as? HTTPURLResponse else {
+            AppLog.api.error("[\(label)] not HTTP response")
             throw APIError.transport(URLError(.badServerResponse))
         }
 
         guard (200 ... 299).contains(http.statusCode) else {
             let text = String(data: data, encoding: .utf8)
+            let preview = (text ?? "").prefix(500)
+            AppLog.api.error("[\(label)] HTTP \(http.statusCode) bodyPrefix=\(String(preview))")
             throw APIError.httpStatus(http.statusCode, text)
         }
 
         let decoder = JSONDecoder()
         do {
-            return try decoder.decode(T.self, from: data)
+            let value = try decoder.decode(T.self, from: data)
+            AppLog.api.info("[\(label)] decoded \(typeName) bytes=\(data.count)")
+            return value
         } catch {
+            let bodyPreview = String(data: data.prefix(1200), encoding: .utf8) ?? "<binary \(data.count) bytes>"
+            AppLog.api.error("[\(label)] JSON decode FAILED type=\(typeName) error=\(Self.decodingErrorDetail(error)) bodyPrefix=\(bodyPreview)")
             throw APIError.decoding(error)
         }
+    }
+
+    private static func decodingErrorDetail(_ error: Error) -> String {
+        guard let e = error as? DecodingError else {
+            return error.localizedDescription
+        }
+        switch e {
+        case let .typeMismatch(type, ctx):
+            return "typeMismatch(\(type)) at \(codingPathString(ctx.codingPath)): \(ctx.debugDescription)"
+        case let .valueNotFound(type, ctx):
+            return "valueNotFound(\(type)) at \(codingPathString(ctx.codingPath)): \(ctx.debugDescription)"
+        case let .keyNotFound(key, ctx):
+            return "keyNotFound(\(key.stringValue)) at \(codingPathString(ctx.codingPath)): \(ctx.debugDescription)"
+        case let .dataCorrupted(ctx):
+            return "dataCorrupted at \(codingPathString(ctx.codingPath)): \(ctx.debugDescription)"
+        @unknown default:
+            return String(describing: e)
+        }
+    }
+
+    private static func codingPathString(_ path: [CodingKey]) -> String {
+        path.map(\.stringValue).joined(separator: ".")
+    }
+}
+
+private extension APIClient {
+    func perform<T: Decodable>(_ request: URLRequest, decode: T.Type) async throws -> T {
+        try await perform(request, decode: T.self, label: pathLabel(request.url))
+    }
+
+    func pathLabel(_ url: URL?) -> String {
+        guard let p = url?.path else { return "request" }
+        if p.hasSuffix("push.php") { return "push" }
+        if p.hasSuffix("pull.php") { return "pull" }
+        if p.hasSuffix("search-items.php") { return "search" }
+        return (p as NSString).lastPathComponent
     }
 }

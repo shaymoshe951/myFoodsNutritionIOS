@@ -19,7 +19,6 @@
 		BF0010 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = FR0010 /* APIClient.swift */; };
 		BF0011 /* SyncEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = FR0011 /* SyncEngine.swift */; };
 		BF0012 /* NetworkPathMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = FR0012 /* NetworkPathMonitor.swift */; };
-		BF0019 /* AppLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = FR0019 /* AppLog.swift */; };
 		BF0013 /* DailyDiaryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FR0013 /* DailyDiaryView.swift */; };
 		BF0014 /* DailyDiaryViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FR0014 /* DailyDiaryViewModel.swift */; };
 		BF0015 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FR0015 /* SettingsView.swift */; };
@@ -41,7 +40,6 @@
 		FR0010 /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
 		FR0011 /* SyncEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncEngine.swift; sourceTree = "<group>"; };
 		FR0012 /* NetworkPathMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkPathMonitor.swift; sourceTree = "<group>"; };
-		FR0019 /* AppLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLog.swift; sourceTree = "<group>"; };
 		FR0013 /* DailyDiaryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DailyDiaryView.swift; sourceTree = "<group>"; };
 		FR0014 /* DailyDiaryViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DailyDiaryViewModel.swift; sourceTree = "<group>"; };
 		FR0015 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
@@ -136,7 +134,6 @@
 			isa = PBXGroup;
 			children = (
 				FR0012 /* NetworkPathMonitor.swift */,
-				FR0019 /* AppLog.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -264,7 +261,6 @@
 				BF0010 /* APIClient.swift in Sources */,
 				BF0011 /* SyncEngine.swift in Sources */,
 				BF0012 /* NetworkPathMonitor.swift in Sources */,
-				BF0019 /* AppLog.swift in Sources */,
 				BF0013 /* DailyDiaryView.swift in Sources */,
 				BF0014 /* DailyDiaryViewModel.swift in Sources */,
 				BF0015 /* SettingsView.swift in Sources */,

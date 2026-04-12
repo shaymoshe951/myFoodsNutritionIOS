@@ -1,4 +1,12 @@
 import Foundation
+import os
+
+/// Unified logging (Xcode console / Console.app). Same module as `SyncEngine`.
+enum AppLog {
+    private static let subsystem = Bundle.main.bundleIdentifier ?? "MyFoodsNutrition"
+    static let api = Logger(subsystem: subsystem, category: "API")
+    static let sync = Logger(subsystem: subsystem, category: "Sync")
+}
 
 /// Talks to PHP API: `POST {base}/sync/push.php`, `GET {base}/sync/pull.php?since_id=`.
 final class APIClient {

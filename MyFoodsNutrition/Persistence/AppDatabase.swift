@@ -140,8 +140,9 @@ final class AppDatabase {
     func applyPushResponse(_ results: [DailyItemDTO.PushResult]) throws {
         try dbQueue.write { db in
             for r in results {
+                guard let cu = r.client_uuid, !cu.isEmpty else { continue }
                 guard var row = try DailyItemRecord
-                    .filter(DailyItemRecord.Columns.clientUuid == r.client_uuid)
+                    .filter(DailyItemRecord.Columns.clientUuid == cu)
                     .fetchOne(db) else { continue }
                 if row.deleted {
                     try row.delete(db)

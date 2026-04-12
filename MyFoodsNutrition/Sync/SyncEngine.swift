@@ -113,24 +113,38 @@ final class SyncEngine: ObservableObject {
         AppLog.sync.info("pushPending: server returned \(response.results.count) result(s)")
     }
 
+    /// Server returns up to this many rows per request (`api/v1/sync/pull.php`). Pull in a loop so one sync can drain a large backlog (e.g. after DB bootstrap).
+    private static let pullPageSize = 500
+    private static let maxPullIterations = 120
+
     private func pullAndPersist() async throws {
-        let since = try database.getLastChangeLogId()
-        AppLog.sync.info("pullAndPersist: since_id=\(since)")
-        let page = try await apiClient.pull(sinceId: since)
-        AppLog.sync.info("pullAndPersist: received \(page.changes.count) change(s) next_since=\(page.next_since_id.map(String.init) ?? "nil")")
-        var maxId = since
-        for change in page.changes {
-            do {
-                try database.applyRemoteChange(change)
-            } catch {
-                AppLog.sync.error("applyRemoteChange failed id=\(change.id) action=\(change.action) entity=\(change.entity_uid.map(String.init) ?? "nil"): \(String(describing: error))")
-                throw error
+        var iteration = 0
+        repeat {
+            iteration += 1
+            let since = try database.getLastChangeLogId()
+            AppLog.sync.info("pullAndPersist: since_id=\(since) iteration=\(iteration)")
+            let page = try await apiClient.pull(sinceId: since)
+            AppLog.sync.info("pullAndPersist: received \(page.changes.count) change(s) next_since=\(page.next_since_id.map(String.init) ?? "nil")")
+            var maxId = since
+            for change in page.changes {
+                do {
+                    try database.applyRemoteChange(change)
+                } catch {
+                    AppLog.sync.error("applyRemoteChange failed id=\(change.id) action=\(change.action) entity=\(change.entity_uid.map(String.init) ?? "nil"): \(String(describing: error))")
+                    throw error
+                }
+                maxId = max(maxId, change.id)
             }
-            maxId = max(maxId, change.id)
-        }
-        if let next = page.next_since_id {
-            maxId = max(maxId, next)
-        }
-        try database.setLastChangeLogId(maxId)
+            if let next = page.next_since_id {
+                maxId = max(maxId, next)
+            }
+            try database.setLastChangeLogId(maxId)
+
+            if page.changes.count < Self.pullPageSize { break }
+            if iteration >= Self.maxPullIterations {
+                AppLog.sync.info("pullAndPersist: stopping after \(Self.maxPullIterations) page(s); tap sync again to continue")
+                break
+            }
+        } while true
     }
 }

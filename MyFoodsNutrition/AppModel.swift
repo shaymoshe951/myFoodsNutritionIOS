@@ -36,4 +36,10 @@ final class AppModel: ObservableObject {
     func reloadAPIConfig() {
         apiClient.config = APIConfig.load()
     }
+
+    /// Resets the stored `since_id` to 0 and runs sync so all `sync_change_log` rows are applied again (merges safely by server UID).
+    func resyncFromFirstChangeLog() async throws {
+        try database.resetSyncCursorForFullReplay()
+        try await syncEngine.syncNow()
+    }
 }

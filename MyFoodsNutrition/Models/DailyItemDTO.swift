@@ -73,6 +73,7 @@ enum DailyItemDTO {
 
         private static func decodeInt64Lenient(_ c: KeyedDecodingContainer<CodingKeys>, key: CodingKeys) throws -> Int64? {
             if c.contains(key) == false { return nil }
+            if try c.decodeNil(forKey: key) { return nil }
             if let v = try? c.decode(Int64.self, forKey: key) { return v }
             if let v = try? c.decode(Int.self, forKey: key) { return Int64(v) }
             if let v = try? c.decode(Double.self, forKey: key) { return Int64(v) }
@@ -84,6 +85,7 @@ enum DailyItemDTO {
 
         private static func decodeIntLenient(_ c: KeyedDecodingContainer<CodingKeys>, key: CodingKeys) throws -> Int? {
             if c.contains(key) == false { return nil }
+            if try c.decodeNil(forKey: key) { return nil }
             if let v = try? c.decode(Int.self, forKey: key) { return v }
             if let v = try? c.decode(Int64.self, forKey: key) { return Int(v) }
             if let v = try? c.decode(Double.self, forKey: key) { return Int(v.rounded(.towardZero)) }
@@ -95,6 +97,7 @@ enum DailyItemDTO {
 
         private static func decodeStringLenient(_ c: KeyedDecodingContainer<CodingKeys>, key: CodingKeys) throws -> String? {
             if c.contains(key) == false { return nil }
+            if try c.decodeNil(forKey: key) { return nil }
             if let s = try? c.decode(String.self, forKey: key) { return s }
             if let n = try? c.decode(Int.self, forKey: key) { return String(n) }
             if let n = try? c.decode(Double.self, forKey: key) { return String(n) }
@@ -120,6 +123,7 @@ enum DailyItemDTO {
 
         private static func decodeInt64Lenient(_ c: KeyedDecodingContainer<CodingKeys>, key: CodingKeys) throws -> Int64? {
             if c.contains(key) == false { return nil }
+            if try c.decodeNil(forKey: key) { return nil }
             if let v = try? c.decode(Int64.self, forKey: key) { return v }
             if let v = try? c.decode(Int.self, forKey: key) { return Int64(v) }
             if let v = try? c.decode(Double.self, forKey: key) { return Int64(v) }

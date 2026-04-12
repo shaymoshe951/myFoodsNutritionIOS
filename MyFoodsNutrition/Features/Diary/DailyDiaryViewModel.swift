@@ -172,29 +172,33 @@ final class DailyDiaryViewModel: ObservableObject {
         }
     }
 
+    /// Diary dates follow the site (`addDailyItemDB.php`): Gregorian calendar, Asia/Jerusalem.
+    /// The DatePicker should use this calendar too, or `dateKey` can shift when the device timezone differs.
+    static let diaryCalendar: Calendar = {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = TimeZone(identifier: "Asia/Jerusalem")!
+        return c
+    }()
+
     private static let dateFormatter: DateFormatter = {
         let f = DateFormatter()
-        f.calendar = Calendar(identifier: .gregorian)
+        f.calendar = diaryCalendar
         f.locale = Locale(identifier: "en_US_POSIX")
-        f.timeZone = TimeZone(identifier: "Asia/Jerusalem")
         f.dateFormat = "yyyy-MM-dd"
         return f
     }()
 
     static func itmTimeNow() -> String {
         let f = DateFormatter()
-        f.calendar = Calendar(identifier: .gregorian)
+        f.calendar = diaryCalendar
         f.locale = Locale(identifier: "en_US_POSIX")
-        f.timeZone = TimeZone(identifier: "Asia/Jerusalem")
         f.dateFormat = "HH:mm"
         return f.string(from: Date())
     }
 
     /// Mirrors server-side defaults from `addDailyItemDB.php` (Asia/Jerusalem).
     static func defaultMeal(for date: Date) -> String {
-        var cal = Calendar(identifier: .gregorian)
-        cal.timeZone = TimeZone(identifier: "Asia/Jerusalem")!
-        let comps = cal.dateComponents([.hour, .minute], from: date)
+        let comps = diaryCalendar.dateComponents([.hour, .minute], from: date)
         let minutes = (comps.hour ?? 0) * 60 + (comps.minute ?? 0)
         switch minutes {
         case 360 ..< 720: return "ארוחת בוקר"

@@ -5,6 +5,8 @@ struct SettingsView: View {
     @State private var baseURL = ""
     @State private var token = ""
     @State private var savedNotice = false
+    @State private var isReplayingSync = false
+    @State private var replaySyncError: String?
 
     var body: some View {
         Form {
@@ -35,6 +37,35 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+
+            Section {
+                Button {
+                    Task {
+                        isReplayingSync = true
+                        replaySyncError = nil
+                        defer { isReplayingSync = false }
+                        do {
+                            try await appModel.resyncFromFirstChangeLog()
+                        } catch {
+                            replaySyncError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                        }
+                    }
+                } label: {
+                    if isReplayingSync {
+                        HStack {
+                            ProgressView()
+                            Text("מייבא מחדש מהשרת…")
+                        }
+                    } else {
+                        Text("ייבא מחדש הכל מהשרת (סנכרון מלא)")
+                    }
+                }
+                .disabled(!appModel.apiClient.config.isConfigured || isReplayingSync)
+            } header: {
+                Text("יומן")
+            } footer: {
+                Text("משמש אם פריטים מהעבר לא מופיעים: מאפס את סמן הסנכרון ומושך שוב את כל השורות מ־sync_change_log (בטוח: מתמזג לפי מזהה שרת).")
+            }
         }
         .navigationTitle("הגדרות")
         .onAppear {
@@ -46,6 +77,14 @@ struct SettingsView: View {
             Button("אישור", role: .cancel) {}
         } message: {
             Text("ההגדרות נשמרו. סנכרון הבא ישתמש בהן.")
+        }
+        .alert("ייבוא מחדש", isPresented: Binding(
+            get: { replaySyncError != nil },
+            set: { if !$0 { replaySyncError = nil } }
+        )) {
+            Button("אישור", role: .cancel) { replaySyncError = nil }
+        } message: {
+            Text(replaySyncError ?? "")
         }
     }
 }

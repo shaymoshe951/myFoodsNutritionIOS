@@ -13,9 +13,18 @@ final class APIClient {
     var config: APIConfig
     private let session: URLSession
 
-    init(config: APIConfig, session: URLSession = .shared) {
+    /// Longer than `URLSession.shared` defaults to reduce spurious `nw_read_request_report … Operation timed out` on slow mobile networks / shared hosting.
+    private static let defaultSession: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 120
+        config.timeoutIntervalForResource = 600
+        config.waitsForConnectivity = true
+        return URLSession(configuration: config)
+    }()
+
+    init(config: APIConfig, session: URLSession? = nil) {
         self.config = config
-        self.session = session
+        self.session = session ?? Self.defaultSession
     }
 
     func push(operations: [DailyItemDTO.PushOperation]) async throws -> DailyItemDTO.PushResponse {

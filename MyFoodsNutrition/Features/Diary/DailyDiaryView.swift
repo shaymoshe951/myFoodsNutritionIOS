@@ -20,6 +20,7 @@ struct DailyDiaryView: View {
                 Section {
                     DatePicker("תאריך", selection: $viewModel.selectedDate, displayedComponents: .date)
                         .environment(\.locale, Locale(identifier: "he_IL"))
+                        .environment(\.calendar, DailyDiaryViewModel.diaryCalendar)
                         .onChange(of: viewModel.selectedDate) { _, _ in
                             viewModel.load()
                         }

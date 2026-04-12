@@ -58,6 +58,11 @@ final class AppDatabase {
         }
     }
 
+    /// Clears the stored `sync_change_log` cursor so the next pull replays from id 0 (merges safely by `server_uid`).
+    func resetSyncCursorForFullReplay() throws {
+        try setLastChangeLogId(0)
+    }
+
     // MARK: - Diary
 
     func itemsForDate(_ date: String) throws -> [DailyItemRecord] {
@@ -168,16 +173,35 @@ final class AppDatabase {
                 try db.execute(sql: "DELETE FROM daily_item WHERE server_uid = ?", arguments: [uid])
                 return
             }
-            guard change.action == "upsert",
-                  let payload = change.payload,
-                  let serverUid = payload.UID ?? change.entity_uid,
-                  let itmDate = payload.itmDate,
-                  let itemName = payload.itemName,
-                  let quantity = payload.quantity,
-                  let meal = payload.mealTimeSlot,
-                  let itmTime = payload.itmTime,
-                  let remoteUpdated = payload.updated_at
-            else { return }
+            guard change.action == "upsert", let payload = change.payload else {
+                AppLog.sync.notice("applyRemoteChange: skip id=\(change.id) (not upsert or missing payload)")
+                return
+            }
+            let serverUidOpt = payload.UID ?? change.entity_uid
+            guard let serverUid = serverUidOpt else {
+                AppLog.sync.notice("applyRemoteChange: skip id=\(change.id) (no UID)")
+                return
+            }
+            guard let rawDate = payload.itmDate?.trimmingCharacters(in: .whitespacesAndNewlines), !rawDate.isEmpty else {
+                AppLog.sync.notice("applyRemoteChange: skip id=\(change.id) uid=\(serverUid) (no itmDate)")
+                return
+            }
+            let itmDate = Self.normalizeItmDate(rawDate)
+            guard let itemName = payload.itemName?.trimmingCharacters(in: .whitespacesAndNewlines), !itemName.isEmpty else {
+                AppLog.sync.notice("applyRemoteChange: skip id=\(change.id) uid=\(serverUid) (no itemName)")
+                return
+            }
+            guard let remoteUpdated = payload.updated_at?.trimmingCharacters(in: .whitespacesAndNewlines), !remoteUpdated.isEmpty else {
+                AppLog.sync.notice("applyRemoteChange: skip id=\(change.id) uid=\(serverUid) (no updated_at)")
+                return
+            }
+            let quantity = max(1, payload.quantity ?? 1)
+            let meal = payload.mealTimeSlot?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let itmTime = payload.itmTime?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "00:00"
+            let deletedFlag: Bool = {
+                guard let s = payload.deleted_at?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty else { return false }
+                return true
+            }()
 
             if let existing = try DailyItemRecord.filter(DailyItemRecord.Columns.serverUid == serverUid).fetchOne(db) {
                 if existing.updatedAt >= remoteUpdated { return }
@@ -188,7 +212,7 @@ final class AppDatabase {
                 next.mealTimeSlot = meal
                 next.itmTime = itmTime
                 next.updatedAt = remoteUpdated
-                next.deleted = payload.deleted_at != nil
+                next.deleted = deletedFlag
                 next.needsPush = false
                 if next.deleted {
                     try next.delete(db)
@@ -198,7 +222,7 @@ final class AppDatabase {
                 return
             }
 
-            if let deletedAt = payload.deleted_at, !deletedAt.isEmpty {
+            if deletedFlag {
                 return
             }
 
@@ -218,6 +242,13 @@ final class AppDatabase {
             )
             try row.insert(db)
         }
+    }
+
+    private static func normalizeItmDate(_ raw: String) -> String {
+        let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard t.count >= 10 else { return t }
+        let head = String(t.prefix(10))
+        return head.contains("-") ? head : t
     }
 }
 

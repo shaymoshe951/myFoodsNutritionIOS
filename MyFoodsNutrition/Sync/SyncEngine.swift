@@ -5,6 +5,8 @@ final class SyncEngine: ObservableObject {
     @Published private(set) var isSyncing = false
     @Published private(set) var lastError: String?
     @Published private(set) var lastSyncedAt: Date?
+    /// Set when `food_catalog_item` was replaced successfully (offline search / local day totals).
+    @Published private(set) var lastFoodCatalogAt: Date?
 
     private let database: AppDatabase
     private let apiClient: APIClient
@@ -23,6 +25,7 @@ final class SyncEngine: ObservableObject {
         AppLog.sync.info("pullOnLaunch: flush push then pull")
         await flushPendingPushWhenOnline()
         await pullSilently()
+        await syncFoodCatalogIfConfigured()
     }
 
     /// When network becomes available, retry pending uploads.
@@ -59,6 +62,7 @@ final class SyncEngine: ObservableObject {
             AppLog.sync.error("syncNow failed at pullAndPersist: \(String(describing: error))")
             throw error
         }
+        await syncFoodCatalogIfConfigured()
         lastSyncedAt = Date()
     }
 
@@ -146,5 +150,18 @@ final class SyncEngine: ObservableObject {
                 break
             }
         } while true
+    }
+
+    /// Downloads the full food DB (`table_items_data`) into SQLite so search and day totals work offline.
+    private func syncFoodCatalogIfConfigured() async {
+        guard apiClient.config.isConfigured else { return }
+        do {
+            let cat = try await apiClient.fetchFoodCatalog()
+            try database.replaceFoodCatalog(with: cat)
+            lastFoodCatalogAt = Date()
+            AppLog.sync.info("syncFoodCatalog: stored \(cat.items.count) item(s)")
+        } catch {
+            AppLog.sync.error("syncFoodCatalog failed: \(String(describing: error))")
+        }
     }
 }

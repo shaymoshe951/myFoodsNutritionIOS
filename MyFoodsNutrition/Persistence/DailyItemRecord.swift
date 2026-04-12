@@ -12,6 +12,8 @@ struct DailyItemRecord: Codable, FetchableRecord, MutablePersistableRecord {
     var quantity: Int
     var mealTimeSlot: String
     var itmTime: String
+    /// kcal per 100g from food DB when the row was added via in-app search; nil for items synced from server or legacy rows.
+    var energyPer100: Double?
     /// ISO8601 with fractional seconds, UTC or server format; compared lexicographically for LWW.
     var updatedAt: String
     var deleted: Bool
@@ -26,6 +28,7 @@ struct DailyItemRecord: Codable, FetchableRecord, MutablePersistableRecord {
         static let quantity = Column(CodingKeys.quantity)
         static let mealTimeSlot = Column(CodingKeys.mealTimeSlot)
         static let itmTime = Column(CodingKeys.itmTime)
+        static let energyPer100 = Column(CodingKeys.energyPer100)
         static let updatedAt = Column(CodingKeys.updatedAt)
         static let deleted = Column(CodingKeys.deleted)
         static let needsPush = Column(CodingKeys.needsPush)
@@ -40,6 +43,7 @@ struct DailyItemRecord: Codable, FetchableRecord, MutablePersistableRecord {
         case quantity
         case mealTimeSlot = "meal_time_slot"
         case itmTime = "itm_time"
+        case energyPer100 = "energy_per_100"
         case updatedAt = "updated_at"
         case deleted
         case needsPush = "needs_push"

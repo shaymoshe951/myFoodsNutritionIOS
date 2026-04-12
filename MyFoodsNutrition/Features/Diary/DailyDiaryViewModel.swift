@@ -18,7 +18,7 @@ enum DiaryEntryError: LocalizedError {
         case .tooManyNumbers:
             return "יותר ממספר אחד בשורה."
         case .searchNotConfigured:
-            return "הגדר כתובת API ואסימון בהגדרות כדי לחפש מאכלים."
+            return "אין מאגר מזון מקומי וה־API לא הוגדר. הגדר כתובת ואסימון בהגדרות וסנכרן (מוריד את מאגר המזונים), או סנכרן אחרי שכבר הוגדר בעבר."
         }
     }
 }
@@ -41,6 +41,16 @@ final class DailyDiaryViewModel: ObservableObject {
     @Published private(set) var items: [DailyItemRecord] = []
     @Published var selectedDate: Date = .now
     @Published var errorMessage: String?
+
+    /// Bumped in `load()` so views can refetch server-backed nutrition when diary rows change.
+    @Published private(set) var nutritionRefreshToken: Int = 0
+    @Published private(set) var nutritionSummary: DailyNutritionSummaryDTO?
+    @Published private(set) var nutritionSummaryLoading = false
+    @Published private(set) var nutritionSummaryFailed = false
+    /// True when `nutritionSummary` was computed from the on-device `food_catalog_item` table (offline / fallback).
+    @Published private(set) var nutritionSummaryFromLocalCatalog = false
+    /// True after at least one food-catalog sync populated `food_catalog_item`.
+    @Published private(set) var hasLocalFoodCatalog = false
 
     /// Items to show for the current date and display mode (תקציר / מלא).
     func displayedItems(mode: DiaryDisplayMode) -> [DailyItemRecord] {
@@ -90,16 +100,68 @@ final class DailyDiaryViewModel: ObservableObject {
         Self.dateFormatter.string(from: selectedDate)
     }
 
+    /// kcal estimated from `_energy` stored on rows added via in-app search (offline-friendly). Omits synced/legacy rows without `energy_per_100`.
+    var estimatedLocalCalories: Double? {
+        Self.sumLocalCalories(from: items)
+    }
+
+    private static func sumLocalCalories(from items: [DailyItemRecord]) -> Double? {
+        var sum = 0.0
+        var any = false
+        for row in items {
+            guard let e = row.energyPer100 else { continue }
+            any = true
+            sum += e * Double(row.quantity) / 100.0
+        }
+        return any ? sum : nil
+    }
+
     func load() {
         do {
             items = try database.itemsForDate(dateKey)
+            hasLocalFoodCatalog = ((try? database.foodCatalogItemCount()) ?? 0) > 0
             errorMessage = nil
+            nutritionRefreshToken += 1
         } catch {
             errorMessage = error.localizedDescription
         }
     }
 
-    /// Debounced live search — same flow as `updateQRSuggestions()` on the site.
+    /// Loads daily totals from the server when possible (full macros). Falls back to the local food catalog, then to `estimatedLocalCalories` in the UI.
+    func refreshNutritionSummary(api: APIClient) async {
+        nutritionSummaryFromLocalCatalog = false
+        nutritionSummaryLoading = true
+        nutritionSummaryFailed = false
+        defer { nutritionSummaryLoading = false }
+
+        if api.config.isConfigured {
+            do {
+                nutritionSummary = try await api.dailyNutritionSummary(date: dateKey)
+                return
+            } catch {
+                if let local = try? database.localNutritionSummaryIfAvailable(date: dateKey) {
+                    nutritionSummary = local
+                    nutritionSummaryFromLocalCatalog = true
+                    nutritionSummaryFailed = false
+                    return
+                }
+                nutritionSummary = nil
+                nutritionSummaryFailed = estimatedLocalCalories == nil
+                return
+            }
+        }
+
+        if let local = try? database.localNutritionSummaryIfAvailable(date: dateKey) {
+            nutritionSummary = local
+            nutritionSummaryFromLocalCatalog = true
+            nutritionSummaryFailed = false
+            return
+        }
+        nutritionSummary = nil
+        nutritionSummaryFailed = estimatedLocalCalories == nil
+    }
+
+    /// Debounced live search — same flow as `updateQRSuggestions()` on the site; uses the local catalog when synced.
     func onFoodQueryChanged(_ text: String, api: APIClient) {
         searchDebounceTask?.cancel()
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -107,7 +169,8 @@ final class DailyDiaryViewModel: ObservableObject {
             searchSuggestions = []
             return
         }
-        guard api.config.isConfigured else {
+        let canSearchLocal = ((try? database.foodCatalogItemCount()) ?? 0) > 0
+        if !canSearchLocal, !api.config.isConfigured {
             searchSuggestions = []
             return
         }
@@ -116,7 +179,7 @@ final class DailyDiaryViewModel: ObservableObject {
             try? await Task.sleep(for: .milliseconds(300))
             guard !Task.isCancelled else { return }
             do {
-                let r = try await api.searchFoods(query: text)
+                let r = try await runFoodSearch(trimmed: trimmed, api: api)
                 guard !Task.isCancelled else { return }
                 applySearchUI(r)
             } catch {
@@ -124,6 +187,14 @@ final class DailyDiaryViewModel: ObservableObject {
                 searchSuggestions = []
             }
         }
+    }
+
+    private func runFoodSearch(trimmed: String, api: APIClient) async throws -> FoodSearchResponse {
+        if ((try? database.foodCatalogItemCount()) ?? 0) > 0 {
+            return try database.searchFoodCatalog(query: trimmed)
+        }
+        guard api.config.isConfigured else { throw DiaryEntryError.searchNotConfigured }
+        return try await api.searchFoods(query: trimmed)
     }
 
     private func applySearchUI(_ r: FoodSearchResponse) {
@@ -141,11 +212,13 @@ final class DailyDiaryViewModel: ObservableObject {
 
     /// Same rules as `qrSearchSubmitted()` in `index.php`.
     func submitFoodQueryLine(_ raw: String, api: APIClient) async throws {
-        guard api.config.isConfigured else { throw DiaryEntryError.searchNotConfigured }
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+        if ((try? database.foodCatalogItemCount()) ?? 0) == 0, !api.config.isConfigured {
+            throw DiaryEntryError.searchNotConfigured
+        }
 
-        let obj = try await api.searchFoods(query: trimmed)
+        let obj = try await runFoodSearch(trimmed: trimmed, api: api)
 
         if obj.error == "too many numbers!" {
             throw DiaryEntryError.tooManyNumbers
@@ -177,13 +250,14 @@ final class DailyDiaryViewModel: ObservableObject {
             throw DiaryEntryError.pickExactFood
         }
 
-        let itemName = obj.items[pick].itemName
+        let picked = obj.items[pick]
+        let itemName = picked.itemName
         let time = Self.itmTimeNow()
-        addItem(name: itemName, quantity: numDesired, meal: "", time: time)
+        addItem(name: itemName, quantity: numDesired, meal: "", time: time, energyPer100: picked.energy)
         searchSuggestions = []
     }
 
-    func addItem(name: String, quantity: Int, meal: String, time: String) {
+    func addItem(name: String, quantity: Int, meal: String, time: String, energyPer100: Double? = nil) {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         do {
@@ -192,7 +266,8 @@ final class DailyDiaryViewModel: ObservableObject {
                 itemName: trimmed,
                 quantity: max(1, quantity),
                 mealTimeSlot: meal.isEmpty ? DailyDiaryViewModel.defaultMeal(for: Date()) : meal,
-                itmTime: time
+                itmTime: time,
+                energyPer100: energyPer100
             )
             load()
         } catch {

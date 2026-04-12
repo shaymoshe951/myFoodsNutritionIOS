@@ -80,6 +80,46 @@ struct DailyDiaryView: View {
                 }
 
                 Section {
+                    if !appModel.apiClient.config.isConfigured {
+                        Text(
+                            viewModel.hasLocalFoodCatalog
+                                ? "מאגר המזונים המלא נשמר במכשיר — סיכום יום מחושב מקומית. הגדר API כדי לסנכרן יומן עם השרת."
+                                : "הגדר API בהגדרות כדי להוריד את מאגר המזונים ולסנכרן, ולהציג סיכום מלא (או סיכום קלוריות מקומי לפריטים שנוספו מהאפליקציה)."
+                        )
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .multilineTextAlignment(.leading)
+                    } else if viewModel.nutritionSummaryLoading {
+                        HStack(spacing: 10) {
+                            ProgressView()
+                            Text("טוען סיכום תזונה…")
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    } else if let s = viewModel.nutritionSummary {
+                        dailyNutritionSummaryContent(s)
+                    } else if let cal = viewModel.estimatedLocalCalories {
+                        localCaloriesOnlyContent(cal)
+                    } else if viewModel.nutritionSummaryFailed {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("לא ניתן לטעון סיכום מהשרת ואין התאמה מלאה במאגר המקומי.")
+                            Text("ודא שקובץ daily-nutrition-summary.php קיים ב־api/v1, שיש חיבור יציב, או סנכרן כדי להוריד catalog-items.php (מאגר מזונים).")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .multilineTextAlignment(.leading)
+                    }
+                } header: {
+                    Text("סיכום יום")
+                } footer: {
+                    nutritionSummaryFooter
+                }
+
+                Section {
                     TextField("מה אכלתם היום?", text: $queryLine)
                         .textFieldStyle(.roundedBorder)
                         .multilineTextAlignment(.leading)
@@ -238,13 +278,13 @@ struct DailyDiaryView: View {
             } message: {
                 Text(submitAlert ?? "")
             }
-            .alert("עריכת כמות [גרם]", isPresented: Binding(
+            .alert("עריכת כמות", isPresented: Binding(
                 get: { editLocalId != nil },
                 set: { if !$0 { editLocalId = nil } }
             )) {
-                TextField("גרם", text: $editQtyText)
+                TextField("כמות בגרם", text: $editQtyText)
                     .keyboardType(.numberPad)
-                Button("אישור") {
+                Button("שמור") {
                     if let id = editLocalId, let q = Int(editQtyText), q > 0 {
                         viewModel.updateQuantity(localId: id, quantity: q)
                     }
@@ -252,7 +292,7 @@ struct DailyDiaryView: View {
                 }
                 Button("ביטול", role: .cancel) { editLocalId = nil }
             } message: {
-                Text("הזן כמות בגרם")
+                Text("הזן כמות חדשה בגרם.")
             }
             .alert("מחיקת פריט", isPresented: Binding(
                 get: { pendingDelete != nil },
@@ -271,7 +311,97 @@ struct DailyDiaryView: View {
             .onAppear {
                 viewModel.load()
             }
+            .onChange(of: appModel.syncEngine.lastSyncedAt) { _, _ in
+                viewModel.load()
+            }
+            .onChange(of: appModel.syncEngine.lastFoodCatalogAt) { _, _ in
+                viewModel.load()
+            }
+            .task(id: "\(viewModel.dateKey)-\(viewModel.nutritionRefreshToken)") {
+                await viewModel.refreshNutritionSummary(api: appModel.apiClient)
+            }
         }
+    }
+
+    @ViewBuilder
+    private func dailyNutritionSummaryContent(_ s: DailyNutritionSummaryDTO) -> some View {
+        if s.totals.isEmpty {
+            Text("אין נתוני תזונה ליום זה.")
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            let order = DailyNutritionSummaryDTO.displayOrder
+            if let cal = s.totals["energy"] {
+                Text("\(Self.formatNutInt(cal)) קלוריות")
+                    .font(.title3.weight(.semibold))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            ForEach(Array(order.filter { $0 != "energy" }), id: \.self) { key in
+                if let v = s.totals[key] {
+                    HStack {
+                        Text(s.labels_he?[key] ?? key)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text(Self.formatNutValue(v, key: key))
+                    }
+                    .font(.subheadline)
+                }
+            }
+        }
+    }
+
+    private static func formatNutInt(_ v: Double) -> String {
+        String(Int(v.rounded()))
+    }
+
+    private static func formatNutValue(_ v: Double, key: String) -> String {
+        switch key {
+        case "energy":
+            return "\(formatNutInt(v)) קל׳"
+        default:
+            let x = (v * 10).rounded() / 10
+            if x.rounded() == x {
+                return "\(Int(x)) גרם"
+            }
+            return String(format: "%.1f גרם", x)
+        }
+    }
+
+    @ViewBuilder
+    private func localCaloriesOnlyContent(_ cal: Double) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("\(Int(cal.rounded())) קלוריות (הערכה מקומית)")
+                .font(.title3.weight(.semibold))
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Text("חלבון, פחמימות, שומן ושאר הרכיבים מחושבים בשרת (מאגר המזונים המלא). כאן מוצגות רק קלוריות לפי נתון שנשמר בפריט בעת ההוספה מהחיפוש.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .multilineTextAlignment(.leading)
+        }
+    }
+
+    @ViewBuilder
+    private var nutritionSummaryFooter: some View {
+        Group {
+            if viewModel.nutritionSummary != nil {
+                if viewModel.nutritionSummaryFromLocalCatalog {
+                    Text("הסיכום מחושב מהמאגר המקומי (טבלת המזונים שהורדה במכשיר). כשהשרת זמין, ניתן לקבל סיכום מעודכן מהאתר.")
+                } else {
+                    Text("הסיכום המלא מגיע מהשרת — כמו טבלת התזונה באתר. פריטים שעדיין לא סונכרנו עלולים לא להופיע שם.")
+                }
+            } else if viewModel.estimatedLocalCalories != nil {
+                Text("הקלוריות המקומיות כוללות רק פריטים שנשמר בהם ערך קלוריות ל־100 גרם בעת ההוספה מהאפליקציה.")
+            } else {
+                Text(
+                    viewModel.hasLocalFoodCatalog
+                        ? "סנכרן את היומן כשהרשת זמינה. אם אין התאמות בשמות מול המאגר המקומי, הוסף פריטים מחיפוש או הגדר API."
+                        : "לסיכום מלא נדרש מאגר מזונים מקומי (catalog-items.php בסנכרון) או חיבור לשרת עם daily-nutrition-summary.php ב־api/v1."
+                )
+            }
+        }
+        .font(.caption2)
+        .foregroundStyle(.secondary)
     }
 
     private var emptyBriefHint: String {
@@ -324,12 +454,21 @@ private struct DailyItemRow: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("עריכת כמות: \(row.itemName)")
+
+            Button(action: onEdit) {
+                Image(systemName: "square.and.pencil")
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.borderless)
+            .accessibilityLabel("עריכת כמות בגרם")
 
             Button(role: .destructive, action: onDelete) {
                 Image(systemName: "trash")
             }
+            .accessibilityLabel("מחיקה")
         }
-        .accessibilityElement(children: .combine)
     }
 }
 

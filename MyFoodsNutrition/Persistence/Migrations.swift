@@ -26,5 +26,26 @@ enum Migrations {
                 t.column("value", .text).notNull()
             }
         }
+
+        migrator.registerMigration("daily_item_energy_per_100") { db in
+            try db.alter(table: DailyItemRecord.databaseTableName) { t in
+                t.add(column: "energy_per_100", .double)
+            }
+        }
+
+        migrator.registerMigration("food_catalog_v1") { db in
+            try db.create(table: FoodCatalogItemRecord.databaseTableName, ifNotExists: true) { t in
+                t.column("server_uid", .integer).primaryKey()
+                t.column("item_name", .text).notNull()
+                t.column("is_extended", .boolean).notNull()
+                t.column("nutrients_json", .text).notNull()
+            }
+            try db.create(
+                index: "idx_food_catalog_name",
+                on: FoodCatalogItemRecord.databaseTableName,
+                columns: ["item_name"],
+                ifNotExists: true
+            )
+        }
     }
 }

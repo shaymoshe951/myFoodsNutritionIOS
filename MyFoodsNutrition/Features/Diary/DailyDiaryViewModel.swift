@@ -23,11 +23,57 @@ enum DiaryEntryError: LocalizedError {
     }
 }
 
+/// Aligns with `index.php` / `updateDailyNutValues.php` (`butBrief` / `butFull`). Brief filters to recent items when viewing **today** (here: last 2 hours by `itmTime`; web uses ~90 minutes).
+enum DiaryDisplayMode: String, CaseIterable {
+    case brief
+    case full
+
+    var label: String {
+        switch self {
+        case .brief: return "תקציר"
+        case .full: return "מלא"
+        }
+    }
+}
+
 @MainActor
 final class DailyDiaryViewModel: ObservableObject {
     @Published private(set) var items: [DailyItemRecord] = []
     @Published var selectedDate: Date = .now
     @Published var errorMessage: String?
+
+    /// Items to show for the current date and display mode (תקציר / מלא).
+    func displayedItems(mode: DiaryDisplayMode) -> [DailyItemRecord] {
+        switch mode {
+        case .full:
+            return items
+        case .brief:
+            return Self.filterBrief(items: items, selectedDate: selectedDate)
+        }
+    }
+
+    /// On days other than «today», brief shows the full list (same as מלא)—there is no «last 2 hours» window.
+    private static func filterBrief(items: [DailyItemRecord], selectedDate: Date) -> [DailyItemRecord] {
+        guard diaryCalendar.isDateInToday(selectedDate) else { return items }
+        let now = Date()
+        guard let cutoff = diaryCalendar.date(byAdding: .minute, value: -120, to: now) else { return items }
+        return items.filter { row in
+            guard let itemInstant = parseItmTimeToDate(row.itmTime, on: selectedDate) else { return true }
+            return itemInstant >= cutoff
+        }
+    }
+
+    /// Combines the diary day with `itmTime` (`HH:mm` or `HH:mm:ss`) for comparisons.
+    static func parseItmTimeToDate(_ itmTime: String, on day: Date) -> Date? {
+        let trimmed = itmTime.trimmingCharacters(in: .whitespacesAndNewlines)
+        let parts = trimmed.split(separator: ":").compactMap { Int(String($0)) }
+        guard parts.count >= 2 else { return nil }
+        var dc = diaryCalendar.dateComponents([.year, .month, .day], from: day)
+        dc.hour = parts[0]
+        dc.minute = parts[1]
+        dc.second = parts.count > 2 ? parts[2] : 0
+        return diaryCalendar.date(from: dc)
+    }
 
     @Published private(set) var searchSuggestions: [FoodSearchItemDTO] = []
     /// Grams used for calorie preview in suggestions (100 if no number in query yet), like the site.

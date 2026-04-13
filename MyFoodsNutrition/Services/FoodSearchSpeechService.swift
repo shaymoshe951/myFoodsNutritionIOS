@@ -18,7 +18,6 @@ final class FoodSearchSpeechService: NSObject, ObservableObject {
     @Published private(set) var lastErrorMessage: String?
 
     private let whisperClient = WhisperTranscriptionClient()
-
     private let audioEngine = AVAudioEngine()
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     private var recognitionTask: SFSpeechRecognitionTask?

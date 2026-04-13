@@ -368,6 +368,10 @@ struct DailyDiaryView: View {
             .onAppear {
                 viewModel.load()
             }
+            .onChange(of: viewModel.foodSearchAutoSubmitSucceededTick) { _, _ in
+                queryLine = ""
+                viewModel.onFoodQueryChanged("", api: appModel.apiClient)
+            }
             .onChange(of: appModel.syncEngine.lastSyncedAt) { _, _ in
                 viewModel.load()
             }
@@ -528,17 +532,15 @@ struct DailyDiaryView: View {
         case .idle:
             foodSpeech.startListening(
                 onPartial: { text in
-                    let line = viewModel.normalizedQueryText(text)
-                    queryLine = line
-                    viewModel.onFoodQueryChanged(line, api: appModel.apiClient)
+                    queryLine = viewModel.displayQueryFromSpeech(text)
+                    viewModel.onFoodQueryChanged(text, api: appModel.apiClient)
                 },
                 onFinished: { result in
                     switch result {
                     case let .success(text):
-                        let line = viewModel.normalizedQueryText(text)
-                        queryLine = line
+                        queryLine = viewModel.displayQueryFromSpeech(text)
                         Task {
-                            await viewModel.applyFoodQueryNow(line, api: appModel.apiClient)
+                            await viewModel.applyFoodQueryNow(text, api: appModel.apiClient)
                         }
                     case let .failure(err):
                         submitAlert = err.localizedDescription
@@ -548,9 +550,12 @@ struct DailyDiaryView: View {
         }
     }
 
-    private func submitFoodLine() async {
+    /// - Parameter explicitLine: Use after dictation so submit runs with the finalized string even if `queryLine` has not been committed yet.
+    private func submitFoodLine(explicitLine: String? = nil) async {
+        let raw = (explicitLine ?? queryLine).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !raw.isEmpty else { return }
         do {
-            try await viewModel.submitFoodQueryLine(queryLine, api: appModel.apiClient)
+            try await viewModel.submitFoodQueryLine(raw, api: appModel.apiClient)
             queryLine = ""
             viewModel.onFoodQueryChanged("", api: appModel.apiClient)
         } catch let e as DiaryEntryError {

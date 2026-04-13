@@ -88,6 +88,8 @@ final class DailyDiaryViewModel: ObservableObject {
     @Published private(set) var searchSuggestions: [FoodSearchItemDTO] = []
     /// Grams used for calorie preview in suggestions (100 if no number in query yet), like the site.
     @Published private(set) var searchPreviewGrams: Double = 100
+    /// Incremented when «הוסף»/«אוסף» + single unambiguous search causes an automatic add, so the view can clear the text field.
+    @Published private(set) var foodSearchAutoSubmitSucceededTick: Int = 0
 
     private let database: AppDatabase
     private var searchDebounceTask: Task<Void, Never>?
@@ -170,6 +172,7 @@ final class DailyDiaryViewModel: ObservableObject {
             return
         }
 
+        let rawFieldText = text
         // Unstructured `Task` does not inherit @MainActor; UI updates must run on the main actor.
         searchDebounceTask = Task { @MainActor [weak self] in
             guard let self else { return }
@@ -179,6 +182,7 @@ final class DailyDiaryViewModel: ObservableObject {
                 let r = try await runFoodSearch(trimmed: trimmed, api: api)
                 guard !Task.isCancelled else { return }
                 applySearchUI(r)
+                await maybeAutoSubmitAfterSearch(rawFieldText: rawFieldText, trimmed: trimmed, response: r, api: api)
             } catch {
                 guard !Task.isCancelled else { return }
                 searchSuggestions = []
@@ -187,7 +191,8 @@ final class DailyDiaryViewModel: ObservableObject {
     }
 
     /// Runs catalog/API search immediately for the final query string. Use when voice input finishes so suggestion rows are not lost to debounce cancellation races with the last partial/final callbacks.
-    func applyFoodQueryNow(_ text: String, api: APIClient) async {
+    /// - Parameter rawFieldTextForSubmitCue: Original transcript/field text; used to detect «הוסף»/«אוסף» for auto-submit. Defaults to `text` when omitted.
+    func applyFoodQueryNow(_ text: String, api: APIClient, rawFieldTextForSubmitCue: String? = nil) async {
         searchDebounceTask?.cancel()
         searchDebounceTask = nil
         let trimmed = Self.normalizedSearchInput(text)
@@ -200,9 +205,11 @@ final class DailyDiaryViewModel: ObservableObject {
             searchSuggestions = []
             return
         }
+        let rawCue = rawFieldTextForSubmitCue ?? text
         do {
             let r = try await runFoodSearch(trimmed: trimmed, api: api)
             applySearchUI(r)
+            await maybeAutoSubmitAfterSearch(rawFieldText: rawCue, trimmed: trimmed, response: r, api: api)
         } catch {
             searchSuggestions = []
         }
@@ -213,14 +220,63 @@ final class DailyDiaryViewModel: ObservableObject {
         Self.normalizedSearchInput(raw)
     }
 
-    /// Strips invisible bidi/format characters dictation often inserts; maps Arabic‑Indic digits to ASCII so `FoodSearchQueryParser` digit rules match speech.
+    /// Speech text for the field: bidi + digit cleanup only — keeps «הוסף»/«אוסף» visible; search still uses `normalizedSearchInput`.
+    func displayQueryFromSpeech(_ raw: String) -> String {
+        Self.strippedBidiAndDigits(raw).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Strips invisible bidi/format characters dictation often inserts; maps Arabic‑Indic digits to ASCII so `FoodSearchQueryParser` digit rules match speech; removes «הוסף»/«אוסף» so they do not affect catalog search.
     private static func normalizedSearchInput(_ text: String) -> String {
+        let trimmed = strippedBidiAndDigits(text).trimmingCharacters(in: .whitespacesAndNewlines)
+        return removingHebrewSubmitCueTokens(trimmed)
+    }
+
+    private static func strippedBidiAndDigits(_ text: String) -> String {
         var s = text
         for u in ["\u{200E}", "\u{200F}", "\u{FEFF}", "\u{202A}", "\u{202B}", "\u{202C}", "\u{2066}", "\u{2067}", "\u{2068}", "\u{2069}"] {
             s = s.replacingOccurrences(of: u, with: "")
         }
-        s = latinDigitsToASCII(s)
-        return s.trimmingCharacters(in: .whitespacesAndNewlines)
+        return latinDigitsToASCII(s)
+    }
+
+    /// Words that mean “add” in speech (and common misrecognitions); stripped before SQL/API search.
+    private static let hebrewSubmitCueTokens = ["הוסף", "אוסף"]
+
+    private static func removingHebrewSubmitCueTokens(_ s: String) -> String {
+        var t = s
+        for tok in hebrewSubmitCueTokens {
+            while t.contains(tok) {
+                t = t.replacingOccurrences(of: tok, with: " ")
+            }
+        }
+        let ws = try! NSRegularExpression(pattern: "\\s+", options: [])
+        let ns = t as NSString
+        t = ws.stringByReplacingMatches(in: t, options: [], range: NSRange(location: 0, length: ns.length), withTemplate: " ")
+        return t.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func fieldContainsSubmitCue(_ raw: String) -> Bool {
+        let s = strippedBidiAndDigits(raw)
+        return hebrewSubmitCueTokens.contains { s.contains($0) }
+    }
+
+    private static func responseAllowsAutoSubmitLikeEnter(_ r: FoodSearchResponse) -> Bool {
+        guard r.error != "too many numbers!" else { return false }
+        guard r.items.count == 1 else { return false }
+        guard r.numberInResult == 1, r.requiredQuantity != nil else { return false }
+        return true
+    }
+
+    /// If the field contained a submit cue and the search is unambiguous (same conditions as Enter), add the row without requiring the button.
+    private func maybeAutoSubmitAfterSearch(rawFieldText: String, trimmed: String, response: FoodSearchResponse, api: APIClient) async {
+        guard Self.fieldContainsSubmitCue(rawFieldText) else { return }
+        guard Self.responseAllowsAutoSubmitLikeEnter(response) else { return }
+        do {
+            try await submitFoodQueryLine(trimmed, api: api)
+            foodSearchAutoSubmitSucceededTick += 1
+        } catch {
+            // Ambiguous or invalid line: user can fix text or press Enter (we avoid alert spam while typing).
+        }
     }
 
     private static func latinDigitsToASCII(_ text: String) -> String {

@@ -134,6 +134,27 @@ final class DailyDiaryViewModel: ObservableObject {
         nutritionSummaryFailed = false
         defer { nutritionSummaryLoading = false }
 
+        let dayRows = (try? database.itemsForDate(dateKey)) ?? []
+        // No diary rows ⇒ empty summary (not an error). Avoids failing when the server is unreachable.
+        if dayRows.isEmpty {
+            nutritionSummary = DailyNutritionSummaryDTO(date: dateKey, totals: [:])
+            return
+        }
+
+        // New/edited/deleted rows not yet pushed: `daily-nutrition-summary.php` reads the server DB, which
+        // does not include them — using it would show stale totals. Prefer local catalog math until sync completes.
+        let hasUnsyncedDiaryRows = dayRows.contains { $0.needsPush }
+        if hasUnsyncedDiaryRows {
+            if let local = try? database.localNutritionSummaryIfAvailable(date: dateKey) {
+                nutritionSummary = local
+                nutritionSummaryFromLocalCatalog = true
+                return
+            }
+            nutritionSummary = nil
+            nutritionSummaryFailed = estimatedLocalCalories == nil
+            return
+        }
+
         if api.config.isConfigured {
             do {
                 nutritionSummary = try await api.dailyNutritionSummary(date: dateKey)

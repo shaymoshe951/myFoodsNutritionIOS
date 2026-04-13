@@ -103,8 +103,8 @@ struct DailyDiaryView: View {
                         localCaloriesOnlyContent(cal)
                     } else if viewModel.nutritionSummaryFailed {
                         VStack(alignment: .leading, spacing: 6) {
-                            Text("לא ניתן לטעון סיכום מהשרת ואין התאמה מלאה במאגר המקומי.")
-                            Text("ודא שקובץ daily-nutrition-summary.php קיים ב־api/v1, שיש חיבור יציב, או סנכרן כדי להוריד catalog-items.php (מאגר מזונים).")
+                            Text("לא ניתן לטעון סיכום מהשרת, והמאגר המקומי לא מכסה את כל שמות הפריטים ליום זה.")
+                            Text("פריטים מהאתר או מסנכרון ללא התאמה למאגר המזונים לא מקבלים סיכום מלא במצב לא־מקוון. נסה שוב כשהרשת יציבה, או סנכרן (מוריד catalog-items.php). אם הוספת פריטים מהאפליקציה, הוסף שוב מחיפוש כדי לשמור קלוריות ל־100 גרם.")
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                         }

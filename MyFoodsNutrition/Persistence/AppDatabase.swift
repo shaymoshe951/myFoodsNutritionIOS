@@ -288,7 +288,8 @@ final class AppDatabase {
         }
     }
 
-    /// Local search using the same preprocessing as `nutrition_item_search()`; matching is substring + word tokens (SQLite has no MySQL `REGEXP`).
+    /// Local search: same preprocessing as `nutrition_item_search()`; matching is LIKE + word tokens (SQLite has no MySQL `REGEXP`).
+    /// `isExtended` rule matches the web: with `*` in the query, all items match; without `*`, only `isExtended == 0` first, then if no rows, repeat without that filter (`item_search.php` lines 68–96).
     func searchFoodCatalog(query raw: String) throws -> FoodSearchResponse {
         let parsed = FoodSearchQueryParser.parse(raw)
         var res = FoodSearchResponse(
@@ -320,13 +321,16 @@ final class AppDatabase {
 
         return try dbQueue.read { db in
             var rows: [FoodCatalogItemRecord] = []
-            if !parsed.isStarCharInStr {
-                rows = try Self.fetchCatalogCandidates(db: db, pattern: pattern, extendedNonOnly: true)
+            if parsed.isStarCharInStr {
+                rows = try Self.fetchCatalogCandidates(db: db, pattern: pattern, requireIsExtendedZero: false)
                 rows = rows.filter { matchesWords($0.itemName) }
-            }
-            if rows.isEmpty {
-                rows = try Self.fetchCatalogCandidates(db: db, pattern: pattern, extendedNonOnly: false)
+            } else {
+                rows = try Self.fetchCatalogCandidates(db: db, pattern: pattern, requireIsExtendedZero: true)
                 rows = rows.filter { matchesWords($0.itemName) }
+                if rows.isEmpty {
+                    rows = try Self.fetchCatalogCandidates(db: db, pattern: pattern, requireIsExtendedZero: false)
+                    rows = rows.filter { matchesWords($0.itemName) }
+                }
             }
 
             let nFound = rows.count
@@ -349,14 +353,20 @@ final class AppDatabase {
     }
 
     /// Same nutrient aggregation as `daily-nutrition-summary.php` when diary rows resolve in `food_catalog_item`.
+    /// Rows without a catalog match still contribute **energy** if `energy_per_100` was stored when the item was added from search.
     func localNutritionSummaryIfAvailable(date: String) throws -> DailyNutritionSummaryDTO? {
         let rows = try itemsForDate(date)
         var arrNutValues: [String: Double] = [:]
-        for row in rows {
-            guard let nutrients = try nutrientsForItemName(row.itemName) else { continue }
-            let quantity = Double(row.quantity)
-            for (name, v) in nutrients where v > 0 {
-                arrNutValues[name, default: 0] += v * quantity / 100.0
+        try dbQueue.read { db in
+            for row in rows {
+                let quantity = Double(row.quantity)
+                if let nutrients = try Self.lookupCatalogNutrients(db: db, diaryItemName: row.itemName) {
+                    for (name, v) in nutrients where v > 0 {
+                        arrNutValues[name, default: 0] += v * quantity / 100.0
+                    }
+                } else if let e = row.energyPer100 {
+                    arrNutValues["energy", default: 0] += e * quantity / 100.0
+                }
             }
         }
 
@@ -383,20 +393,69 @@ final class AppDatabase {
         return DailyNutritionSummaryDTO(date: date, totals: totals, labels_he: labelsHe)
     }
 
-    private func nutrientsForItemName(_ name: String) throws -> [String: Double]? {
-        try dbQueue.read { db in
-            let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { return nil }
-            guard let row = try FoodCatalogItemRecord
-                .filter(FoodCatalogItemRecord.Columns.itemName == trimmed)
-                .order(FoodCatalogItemRecord.Columns.serverUid.asc)
-                .fetchOne(db)
-            else {
-                return nil
-            }
-            guard let data = row.nutrientsJson.data(using: .utf8) else { return nil }
-            return try JSONDecoder().decode([String: Double].self, from: data)
+    /// Trim + collapse runs of whitespace (synced names often differ only by spaces).
+    private static func normalizedFoodItemName(_ s: String) -> String {
+        let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        let parts = trimmed.split(whereSeparator: { $0.isWhitespace })
+        return parts.joined(separator: " ")
+    }
+
+    private static func decodeNutrientsJson(_ row: FoodCatalogItemRecord) throws -> [String: Double] {
+        guard let data = row.nutrientsJson.data(using: .utf8) else { return [:] }
+        return try JSONDecoder().decode([String: Double].self, from: data)
+    }
+
+    /// Resolves `table_items_data.itemName` quirks vs diary text: exact, collapsed spaces, NFC, SQLite `trim`, repeated-space collapse in DB.
+    private static func lookupCatalogNutrients(db: Database, diaryItemName: String) throws -> [String: Double]? {
+        let trimmed = diaryItemName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let norm = normalizedFoodItemName(trimmed)
+        let nfc = trimmed.precomposedStringWithCanonicalMapping
+
+        let table = FoodCatalogItemRecord.databaseTableName
+        let orderBy = "ORDER BY server_uid ASC LIMIT 1"
+
+        if let row = try FoodCatalogItemRecord
+            .filter(FoodCatalogItemRecord.Columns.itemName == trimmed)
+            .order(FoodCatalogItemRecord.Columns.serverUid.asc)
+            .fetchOne(db) {
+            return try decodeNutrientsJson(row)
         }
+        if norm != trimmed,
+           let row = try FoodCatalogItemRecord
+            .filter(FoodCatalogItemRecord.Columns.itemName == norm)
+            .order(FoodCatalogItemRecord.Columns.serverUid.asc)
+            .fetchOne(db) {
+            return try decodeNutrientsJson(row)
+        }
+        if nfc != trimmed,
+           let row = try FoodCatalogItemRecord
+            .filter(FoodCatalogItemRecord.Columns.itemName == nfc)
+            .order(FoodCatalogItemRecord.Columns.serverUid.asc)
+            .fetchOne(db) {
+            return try decodeNutrientsJson(row)
+        }
+
+        let sqlTrim = "SELECT * FROM \(table) WHERE trim(item_name) = trim(?) \(orderBy)"
+        if let row = try FoodCatalogItemRecord.fetchOne(db, sql: sqlTrim, arguments: [trimmed]) {
+            return try decodeNutrientsJson(row)
+        }
+        if norm != trimmed,
+           let row = try FoodCatalogItemRecord.fetchOne(db, sql: sqlTrim, arguments: [norm]) {
+            return try decodeNutrientsJson(row)
+        }
+
+        // Catalog rows may contain double spaces or tabs; compare after collapsing `  ` → ` ` in SQL.
+        let sqlCollapse = """
+        SELECT * FROM \(table)
+        WHERE replace(replace(replace(replace(replace(item_name, CHAR(9), ' '), CHAR(10), ' '), CHAR(13), ' '), '  ', ' '), '  ', ' ') = ?
+        \(orderBy)
+        """
+        if let row = try FoodCatalogItemRecord.fetchOne(db, sql: sqlCollapse, arguments: [norm]) {
+            return try decodeNutrientsJson(row)
+        }
+
+        return nil
     }
 
     private static func sqlLikeFragment(containing text: String) -> String {
@@ -406,16 +465,17 @@ final class AppDatabase {
             .replacingOccurrences(of: "_", with: "\\_")
     }
 
+    /// When `requireIsExtendedZero` is true, matches `table_items_data` behaviour for searches **without** `*`: `AND isExtended=0`.
     private static func fetchCatalogCandidates(
         db: Database,
         pattern: String,
-        extendedNonOnly: Bool
+        requireIsExtendedZero: Bool
     ) throws -> [FoodCatalogItemRecord] {
         var sql = """
         SELECT * FROM \(FoodCatalogItemRecord.databaseTableName)
         WHERE item_name LIKE ? ESCAPE '\\'
         """
-        if extendedNonOnly {
+        if requireIsExtendedZero {
             sql += " AND is_extended = 0"
         }
         sql += " LIMIT 500"

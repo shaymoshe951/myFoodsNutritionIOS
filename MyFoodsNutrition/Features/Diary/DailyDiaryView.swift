@@ -371,6 +371,7 @@ struct DailyDiaryView: View {
             .onChange(of: viewModel.foodSearchAutoSubmitSucceededTick) { _, _ in
                 queryLine = ""
                 viewModel.onFoodQueryChanged("", api: appModel.apiClient)
+                foodSpeech.resetStreamingRecognitionAfterCommittedLine()
             }
             .onChange(of: appModel.syncEngine.lastSyncedAt) { _, _ in
                 viewModel.load()
@@ -558,6 +559,7 @@ struct DailyDiaryView: View {
             try await viewModel.submitFoodQueryLine(raw, api: appModel.apiClient)
             queryLine = ""
             viewModel.onFoodQueryChanged("", api: appModel.apiClient)
+            foodSpeech.resetStreamingRecognitionAfterCommittedLine()
         } catch let e as DiaryEntryError {
             submitAlert = e.localizedDescription
         } catch {

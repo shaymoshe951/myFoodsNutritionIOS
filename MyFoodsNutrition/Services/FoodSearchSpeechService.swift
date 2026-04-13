@@ -24,6 +24,8 @@ final class FoodSearchSpeechService: NSObject, ObservableObject {
     private var wavAccumulator: WavAccumulator?
     private var tapInstalled = false
     private var selectedLocale: Locale = .current
+    private var speechRecognizer: SFSpeechRecognizer?
+    private var recognitionSessionId = UUID()
 
     private var onPartial: ((String) -> Void)?
     private var onFinished: ((Result<String, Error>) -> Void)?
@@ -36,6 +38,27 @@ final class FoodSearchSpeechService: NSObject, ObservableObject {
         didEmitFinished = false
         tearDownFullSession()
         phase = .idle
+    }
+
+    /// After committing a food line (Enter / add) while the mic stays on: end the current recognition request and start a new one so the next partials don’t repeat the previous utterance.
+    func resetStreamingRecognitionAfterCommittedLine() {
+        guard phase == .listening, tapInstalled, let rec = speechRecognizer else { return }
+
+        recognitionTask?.cancel()
+        recognitionTask = nil
+        recognitionRequest?.endAudio()
+        recognitionRequest = nil
+
+        let req = SFSpeechAudioBufferRecognitionRequest()
+        req.shouldReportPartialResults = true
+        if #available(iOS 13, *) {
+            req.requiresOnDeviceRecognition = false
+        }
+        recognitionRequest = req
+        installRecognitionTask(recognizer: rec, request: req)
+
+        let format = audioEngine.inputNode.outputFormat(forBus: 0)
+        wavAccumulator = WavAccumulator(sampleRate: format.sampleRate, channelCount: format.channelCount)
     }
 
     /// - Parameters:
@@ -92,31 +115,24 @@ final class FoodSearchSpeechService: NSObject, ObservableObject {
             finish(.failure(SpeechServiceError.recognizerUnavailable))
             return
         }
+        speechRecognizer = recognizer
 
         do {
             try session.setCategory(.playAndRecord, mode: .default, options: [.duckOthers, .defaultToSpeaker])
             try session.setActive(true, options: .notifyOthersOnDeactivation)
 
-            recognitionRequest = SFSpeechAudioBufferRecognitionRequest()
-            guard let recognitionRequest else {
-                finish(.failure(SpeechServiceError.internalState))
-                return
-            }
-            recognitionRequest.shouldReportPartialResults = true
+            let req = SFSpeechAudioBufferRecognitionRequest()
+            req.shouldReportPartialResults = true
             if #available(iOS 13, *) {
-                recognitionRequest.requiresOnDeviceRecognition = false
+                req.requiresOnDeviceRecognition = false
             }
+            recognitionRequest = req
 
             let inputNode = audioEngine.inputNode
             let format = inputNode.outputFormat(forBus: 0)
             wavAccumulator = WavAccumulator(sampleRate: format.sampleRate, channelCount: format.channelCount)
 
-            recognitionTask = recognizer.recognitionTask(with: recognitionRequest) { [weak self] result, error in
-                guard let self else { return }
-                Task { @MainActor in
-                    self.handleRecognitionResult(result: result, error: error)
-                }
-            }
+            installRecognitionTask(recognizer: recognizer, request: req)
 
             inputNode.removeTap(onBus: 0)
             inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
@@ -132,6 +148,18 @@ final class FoodSearchSpeechService: NSObject, ObservableObject {
         } catch {
             tearDownFullSession()
             finish(.failure(error))
+        }
+    }
+
+    private func installRecognitionTask(recognizer: SFSpeechRecognizer, request: SFSpeechAudioBufferRecognitionRequest) {
+        let sessionId = UUID()
+        recognitionSessionId = sessionId
+        recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
+            guard let self else { return }
+            Task { @MainActor in
+                guard self.recognitionSessionId == sessionId else { return }
+                self.handleRecognitionResult(result: result, error: error)
+            }
         }
     }
 
@@ -257,6 +285,8 @@ final class FoodSearchSpeechService: NSObject, ObservableObject {
         recognitionTask?.cancel()
         recognitionTask = nil
         wavAccumulator = nil
+        speechRecognizer = nil
+        recognitionSessionId = UUID()
 
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }

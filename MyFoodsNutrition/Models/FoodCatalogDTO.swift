@@ -71,4 +71,48 @@ enum FoodSearchQueryParser {
             requiredQuantity: requiredQuantity
         )
     }
+
+    /// Speech often inserts several digit runs (times, stray digits). Strict `parse` returns `too many numbers!` and yields no catalog rows. Strip **all** number runs for text matching and keep the **last** run as quantity (typical «… 200» grams).
+    static func parseLenientWhenMultipleNumbers(_ rawQuery: String) -> Parsed {
+        var q = rawQuery
+        let isStar = q.contains("*")
+        if isStar {
+            q = q.replacingOccurrences(of: "*", with: "")
+        }
+        q = q.replacingOccurrences(of: "גרם", with: "")
+
+        let numberPattern = try! NSRegularExpression(pattern: #"\d+\.?\d?"#, options: [])
+        let ns = q as NSString
+        let fullRange = NSRange(location: 0, length: ns.length)
+        let matches = numberPattern.matches(in: q, options: [], range: fullRange)
+
+        guard matches.count > 1 else { return parse(rawQuery) }
+
+        var requiredQuantity: Double?
+        var numberInResult = 0
+        if let last = matches.last {
+            let numStr = ns.substring(with: last.range)
+            requiredQuantity = Double(numStr.replacingOccurrences(of: ",", with: "."))
+            numberInResult = 1
+        }
+
+        var qMutable = q
+        for m in matches.reversed() {
+            let r = m.range
+            let s = qMutable as NSString
+            qMutable = s.replacingCharacters(in: r, with: "")
+        }
+
+        let ws = try! NSRegularExpression(pattern: "\\s+", options: [])
+        qMutable = ws.stringByReplacingMatches(in: qMutable, options: [], range: NSRange(location: 0, length: (qMutable as NSString).length), withTemplate: " ")
+        qMutable = qMutable.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        return Parsed(
+            error: nil,
+            isStarCharInStr: isStar,
+            queryTxtOnly: qMutable,
+            numberInResult: numberInResult,
+            requiredQuantity: requiredQuantity
+        )
+    }
 }

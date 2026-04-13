@@ -320,7 +320,10 @@ final class AppDatabase {
     /// Local search: same preprocessing as `nutrition_item_search()`; matching is LIKE + word tokens (SQLite has no MySQL `REGEXP`).
     /// `isExtended` rule matches the web: with `*` in the query, all items match; without `*`, only `isExtended == 0` first, then if no rows, repeat without that filter (`item_search.php` lines 68–96).
     func searchFoodCatalog(query raw: String) throws -> FoodSearchResponse {
-        let parsed = FoodSearchQueryParser.parse(raw)
+        var parsed = FoodSearchQueryParser.parse(raw)
+        if parsed.error == "too many numbers!" {
+            parsed = FoodSearchQueryParser.parseLenientWhenMultipleNumbers(raw)
+        }
         var res = FoodSearchResponse(
             query: raw,
             error: parsed.error ?? "",
@@ -331,9 +334,6 @@ final class AppDatabase {
             numberInResult: parsed.numberInResult,
             requiredQuantity: parsed.requiredQuantity
         )
-        if parsed.error == "too many numbers!" {
-            return res
-        }
         let qOnly = parsed.queryTxtOnly.trimmingCharacters(in: .whitespacesAndNewlines)
         if qOnly.isEmpty {
             return res

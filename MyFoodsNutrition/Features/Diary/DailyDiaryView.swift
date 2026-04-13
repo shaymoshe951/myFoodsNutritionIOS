@@ -5,6 +5,7 @@ struct DailyDiaryView: View {
     @StateObject private var viewModel: DailyDiaryViewModel
     @AppStorage("diaryDisplayMode") private var displayModeRaw: String = DiaryDisplayMode.brief.rawValue
     @State private var queryLine = ""
+    @StateObject private var foodSpeech = FoodSearchSpeechService()
     @State private var isSyncingSheet = false
     @State private var syncAlert: String?
     @State private var submitAlert: String?
@@ -16,6 +17,17 @@ struct DailyDiaryView: View {
         var id: Int64 { localId }
         let localId: Int64
         let itemLabel: String
+    }
+
+    /// `TextField` must use this binding: `.onChange(of: queryLine)` does not run for every edit after programmatic updates (voice), so live search would stop updating until the field is cleared.
+    private var foodSearchQueryBinding: Binding<String> {
+        Binding(
+            get: { queryLine },
+            set: { newValue in
+                queryLine = newValue
+                viewModel.onFoodQueryChanged(newValue, api: appModel.apiClient)
+            }
+        )
     }
 
     init(database: AppDatabase) {
@@ -125,16 +137,44 @@ struct DailyDiaryView: View {
                 }
 
                 Section {
-                    TextField("מה אכלתם היום?", text: $queryLine)
-                        .textFieldStyle(.roundedBorder)
-                        .multilineTextAlignment(.leading)
-                        .submitLabel(.done)
-                        .onChange(of: queryLine) { _, new in
-                            viewModel.onFoodQueryChanged(new, api: appModel.apiClient)
+                    HStack(alignment: .center, spacing: 10) {
+                        TextField("מה אכלתם היום?", text: foodSearchQueryBinding)
+                            .textFieldStyle(.roundedBorder)
+                            .multilineTextAlignment(.leading)
+                            .submitLabel(.done)
+                            .onSubmit {
+                                Task { await submitFoodLine() }
+                            }
+
+                        Group {
+                            switch foodSpeech.phase {
+                            case .idle:
+                                Button {
+                                    toggleFoodVoiceInput()
+                                } label: {
+                                    Image(systemName: "mic")
+                                        .font(.body)
+                                        .foregroundStyle(.secondary)
+                                }
+                                .buttonStyle(.borderless)
+                                .accessibilityLabel("הזנה בקול")
+                            case .listening:
+                                Button {
+                                    foodSpeech.cancelSession()
+                                } label: {
+                                    Image(systemName: "mic.fill")
+                                        .font(.body)
+                                        .foregroundStyle(.red)
+                                }
+                                .buttonStyle(.borderless)
+                                .accessibilityLabel("עצור הקלטה")
+                            case .transcribingRemote:
+                                ProgressView()
+                                    .accessibilityLabel("מתמלל בשרת…")
+                            }
                         }
-                        .onSubmit {
-                            Task { await submitFoodLine() }
-                        }
+                        .frame(width: 36, height: 36)
+                    }
 
                     if !viewModel.searchSuggestions.isEmpty {
                         ForEach(viewModel.searchSuggestions) { item in
@@ -481,10 +521,38 @@ struct DailyDiaryView: View {
             .multilineTextAlignment(.leading)
     }
 
+    private func toggleFoodVoiceInput() {
+        switch foodSpeech.phase {
+        case .listening, .transcribingRemote:
+            foodSpeech.cancelSession()
+        case .idle:
+            foodSpeech.startListening(
+                onPartial: { text in
+                    let line = viewModel.normalizedQueryText(text)
+                    queryLine = line
+                    viewModel.onFoodQueryChanged(line, api: appModel.apiClient)
+                },
+                onFinished: { result in
+                    switch result {
+                    case let .success(text):
+                        let line = viewModel.normalizedQueryText(text)
+                        queryLine = line
+                        Task {
+                            await viewModel.applyFoodQueryNow(line, api: appModel.apiClient)
+                        }
+                    case let .failure(err):
+                        submitAlert = err.localizedDescription
+                    }
+                }
+            )
+        }
+    }
+
     private func submitFoodLine() async {
         do {
             try await viewModel.submitFoodQueryLine(queryLine, api: appModel.apiClient)
             queryLine = ""
+            viewModel.onFoodQueryChanged("", api: appModel.apiClient)
         } catch let e as DiaryEntryError {
             submitAlert = e.localizedDescription
         } catch {

@@ -159,7 +159,7 @@ final class DailyDiaryViewModel: ObservableObject {
     /// Debounced live search — same flow as `updateQRSuggestions()` on the site; uses the local catalog when synced.
     func onFoodQueryChanged(_ text: String, api: APIClient) {
         searchDebounceTask?.cancel()
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = Self.normalizedSearchInput(text)
         if trimmed.isEmpty {
             searchSuggestions = []
             return
@@ -170,7 +170,9 @@ final class DailyDiaryViewModel: ObservableObject {
             return
         }
 
-        searchDebounceTask = Task {
+        // Unstructured `Task` does not inherit @MainActor; UI updates must run on the main actor.
+        searchDebounceTask = Task { @MainActor [weak self] in
+            guard let self else { return }
             try? await Task.sleep(for: .milliseconds(300))
             guard !Task.isCancelled else { return }
             do {
@@ -182,6 +184,62 @@ final class DailyDiaryViewModel: ObservableObject {
                 searchSuggestions = []
             }
         }
+    }
+
+    /// Runs catalog/API search immediately for the final query string. Use when voice input finishes so suggestion rows are not lost to debounce cancellation races with the last partial/final callbacks.
+    func applyFoodQueryNow(_ text: String, api: APIClient) async {
+        searchDebounceTask?.cancel()
+        searchDebounceTask = nil
+        let trimmed = Self.normalizedSearchInput(text)
+        if trimmed.isEmpty {
+            searchSuggestions = []
+            return
+        }
+        let canSearchLocal = ((try? database.foodCatalogItemCount()) ?? 0) > 0
+        if !canSearchLocal, !api.config.isConfigured {
+            searchSuggestions = []
+            return
+        }
+        do {
+            let r = try await runFoodSearch(trimmed: trimmed, api: api)
+            applySearchUI(r)
+        } catch {
+            searchSuggestions = []
+        }
+    }
+
+    /// Exposed so the search field can show the same string used for catalog matching after dictation.
+    func normalizedQueryText(_ raw: String) -> String {
+        Self.normalizedSearchInput(raw)
+    }
+
+    /// Strips invisible bidi/format characters dictation often inserts; maps Arabic‑Indic digits to ASCII so `FoodSearchQueryParser` digit rules match speech.
+    private static func normalizedSearchInput(_ text: String) -> String {
+        var s = text
+        for u in ["\u{200E}", "\u{200F}", "\u{FEFF}", "\u{202A}", "\u{202B}", "\u{202C}", "\u{2066}", "\u{2067}", "\u{2068}", "\u{2069}"] {
+            s = s.replacingOccurrences(of: u, with: "")
+        }
+        s = latinDigitsToASCII(s)
+        return s.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func latinDigitsToASCII(_ text: String) -> String {
+        var result = ""
+        result.reserveCapacity(text.count)
+        for ch in text {
+            guard let v = ch.unicodeScalars.first?.value else {
+                result.append(ch)
+                continue
+            }
+            if (0x0660 ... 0x0669).contains(v), let u = UnicodeScalar(v - 0x0660 + 0x0030) {
+                result.append(Character(u))
+            } else if (0x06F0 ... 0x06F9).contains(v), let u = UnicodeScalar(v - 0x06F0 + 0x0030) {
+                result.append(Character(u))
+            } else {
+                result.append(ch)
+            }
+        }
+        return result
     }
 
     private func runFoodSearch(trimmed: String, api: APIClient) async throws -> FoodSearchResponse {
@@ -207,7 +265,7 @@ final class DailyDiaryViewModel: ObservableObject {
 
     /// Same rules as `qrSearchSubmitted()` in `index.php`.
     func submitFoodQueryLine(_ raw: String, api: APIClient) async throws {
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = Self.normalizedSearchInput(raw)
         guard !trimmed.isEmpty else { return }
         if ((try? database.foodCatalogItemCount()) ?? 0) == 0, !api.config.isConfigured {
             throw DiaryEntryError.searchNotConfigured

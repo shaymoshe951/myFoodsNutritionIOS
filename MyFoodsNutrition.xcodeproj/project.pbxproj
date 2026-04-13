@@ -28,6 +28,9 @@
 		BF0020 /* FoodCatalogDTO.swift in Sources */ = {isa = PBXBuildFile; fileRef = FR0020 /* FoodCatalogDTO.swift */; };
 		BF0021 /* FoodCatalogItemRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = FR0021 /* FoodCatalogItemRecord.swift */; };
 		BF0022 /* NutritionSnapshotDTO.swift in Sources */ = {isa = PBXBuildFile; fileRef = FR0022 /* NutritionSnapshotDTO.swift */; };
+		BF0023 /* SpeechFallbackConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = FR0023 /* SpeechFallbackConfig.swift */; };
+		BF0024 /* WhisperTranscriptionClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = FR0024 /* WhisperTranscriptionClient.swift */; };
+		BF0025 /* FoodSearchSpeechService.swift in Sources */ = {isa = PBXBuildFile; fileRef = FR0025 /* FoodSearchSpeechService.swift */; };
 		BF0017 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = PKG001 /* GRDB */; };
 /* End PBXBuildFile section */
 
@@ -53,6 +56,9 @@
 		FR0020 /* FoodCatalogDTO.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoodCatalogDTO.swift; sourceTree = "<group>"; };
 		FR0021 /* FoodCatalogItemRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoodCatalogItemRecord.swift; sourceTree = "<group>"; };
 		FR0022 /* NutritionSnapshotDTO.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NutritionSnapshotDTO.swift; sourceTree = "<group>"; };
+		FR0023 /* SpeechFallbackConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechFallbackConfig.swift; sourceTree = "<group>"; };
+		FR0024 /* WhisperTranscriptionClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhisperTranscriptionClient.swift; sourceTree = "<group>"; };
+		FR0025 /* FoodSearchSpeechService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoodSearchSpeechService.swift; sourceTree = "<group>"; };
 		PR0001 /* MyFoodsNutrition.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MyFoodsNutrition.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -130,6 +136,8 @@
 				FR0008 /* APIConfig.swift */,
 				FR0009 /* APIError.swift */,
 				FR0010 /* APIClient.swift */,
+				FR0023 /* SpeechFallbackConfig.swift */,
+				FR0024 /* WhisperTranscriptionClient.swift */,
 			);
 			path = Networking;
 			sourceTree = "<group>";
@@ -146,6 +154,7 @@
 			isa = PBXGroup;
 			children = (
 				FR0012 /* NetworkPathMonitor.swift */,
+				FR0025 /* FoodSearchSpeechService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -280,6 +289,9 @@
 				BF0013 /* DailyDiaryView.swift in Sources */,
 				BF0014 /* DailyDiaryViewModel.swift in Sources */,
 				BF0015 /* SettingsView.swift in Sources */,
+				BF0023 /* SpeechFallbackConfig.swift in Sources */,
+				BF0024 /* WhisperTranscriptionClient.swift in Sources */,
+				BF0025 /* FoodSearchSpeechService.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -344,6 +356,8 @@
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "האפליקציה צריכה גישה למיקרופון כדי להמיר דיבור לטקסט בחיפוש מזון.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "האפליקציה צריכה זיהוי דיבור כדי להזין את חיפוש המזון בקול.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -373,6 +387,8 @@
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "האפליקציה צריכה גישה למיקרופון כדי להמיר דיבור לטקסט בחיפוש מזון.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "האפליקציה צריכה זיהוי דיבור כדי להזין את חיפוש המזון בקול.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",

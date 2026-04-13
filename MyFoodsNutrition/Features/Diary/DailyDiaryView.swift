@@ -86,10 +86,10 @@ struct DailyDiaryView: View {
                                 ? "מאגר המזונים המלא נשמר במכשיר — סיכום יום מחושב מקומית. הגדר API כדי לסנכרן יומן עם השרת."
                                 : "הגדר API בהגדרות כדי להוריד את מאגר המזונים ולסנכרן, ולהציג סיכום מלא (או סיכום קלוריות מקומי לפריטים שנוספו מהאפליקציה)."
                         )
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .multilineTextAlignment(.leading)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .multilineTextAlignment(.leading)
                     } else if viewModel.nutritionSummaryLoading {
                         HStack(spacing: 10) {
                             ProgressView()
@@ -103,8 +103,8 @@ struct DailyDiaryView: View {
                         localCaloriesOnlyContent(cal)
                     } else if viewModel.nutritionSummaryFailed {
                         VStack(alignment: .leading, spacing: 6) {
-                            Text("לא ניתן לטעון סיכום מהשרת, והמאגר המקומי לא מכסה את כל שמות הפריטים ליום זה.")
-                            Text("פריטים מהאתר או מסנכרון ללא התאמה למאגר המזונים לא מקבלים סיכום מלא במצב לא־מקוון. נסה שוב כשהרשת יציבה, או סנכרן (מוריד catalog-items.php). אם הוספת פריטים מהאפליקציה, הוסף שוב מחיפוש כדי לשמור קלוריות ל־100 גרם.")
+                            Text("לא ניתן לחשב סיכום מהנתונים המקומיים ליום זה.")
+                            Text("ודא שמאגר המזונים מכיל את שמות הפריטים, או הוסף פריטים מחיפוש עם קלוריות ל־100 גרם.")
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                         }
@@ -112,6 +112,11 @@ struct DailyDiaryView: View {
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .multilineTextAlignment(.leading)
+                    } else {
+                        Text("אין סיכום זמין ליום זה.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 } header: {
                     Text("סיכום יום")
@@ -219,6 +224,18 @@ struct DailyDiaryView: View {
                     }
                 }
 
+                if let summary = viewModel.nutritionSummary,
+                   let rows = summary.nutrition_rows,
+                   !rows.isEmpty,
+                   !summary.totals.isEmpty
+                {
+                    Section {
+                        nutritionRowsTable(rows)
+                    } header: {
+                        Text("ערכים תזונתיים")
+                    }
+                }
+
                 if let err = viewModel.errorMessage {
                     Section {
                         Text(err)
@@ -317,10 +334,53 @@ struct DailyDiaryView: View {
             .onChange(of: appModel.syncEngine.lastFoodCatalogAt) { _, _ in
                 viewModel.load()
             }
-            .task(id: "\(viewModel.dateKey)-\(viewModel.nutritionRefreshToken)") {
-                await viewModel.refreshNutritionSummary(api: appModel.apiClient)
+            .task(id: "\(viewModel.dateKey)-\(viewModel.nutritionRefreshToken)-\(displayModeRaw)") {
+                await viewModel.refreshNutritionSummary(displayMode: displayMode)
+            }
+            .onChange(of: appModel.syncEngine.lastNutritionSnapshotAt) { _, _ in
+                viewModel.load()
             }
         }
+    }
+
+    /// Same columns as `tableNutValues` on the site (RTL: label, total, % of DRI).
+    private func nutritionRowsTable(_ rows: [NutritionTableRow]) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("סימון תזונתי")
+                    .font(.caption.weight(.semibold))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Text("סה\"כ")
+                    .font(.caption.weight(.semibold))
+                    .frame(minWidth: 72, alignment: .trailing)
+                Text("אחוז מהמומלץ")
+                    .font(.caption.weight(.semibold))
+                    .frame(width: 88, alignment: .trailing)
+            }
+            .foregroundStyle(.secondary)
+            ForEach(rows) { row in
+                HStack(alignment: .top, spacing: 8) {
+                    Text(row.label_he)
+                        .font(.caption)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .multilineTextAlignment(.leading)
+                    Text(row.amount_text)
+                        .font(.caption)
+                        .frame(minWidth: 72, alignment: .trailing)
+                        .multilineTextAlignment(.trailing)
+                    Group {
+                        if let p = row.percent {
+                            Text("\(p)%")
+                        } else {
+                            Text("לא ידוע")
+                        }
+                    }
+                    .font(.caption)
+                    .frame(width: 88, alignment: .trailing)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     @ViewBuilder
@@ -373,7 +433,7 @@ struct DailyDiaryView: View {
             Text("\(Int(cal.rounded())) קלוריות (הערכה מקומית)")
                 .font(.title3.weight(.semibold))
                 .frame(maxWidth: .infinity, alignment: .leading)
-            Text("חלבון, פחמימות, שומן ושאר הרכיבים מחושבים בשרת (מאגר המזונים המלא). כאן מוצגות רק קלוריות לפי נתון שנשמר בפריט בעת ההוספה מהחיפוש.")
+            Text("מוצגות רק קלוריות לפי נתון שנשמר בפריט בעת ההוספה מהחיפוש. סנכרן את מאגר המזונים כדי לחשב את כל הרכיבים מהיומן.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -385,10 +445,10 @@ struct DailyDiaryView: View {
     private var nutritionSummaryFooter: some View {
         Group {
             if viewModel.nutritionSummary != nil {
-                if viewModel.nutritionSummaryFromLocalCatalog {
-                    Text("הסיכום מחושב מהמאגר המקומי (טבלת המזונים שהורדה במכשיר). כשהשרת זמין, ניתן לקבל סיכום מעודכן מהאתר.")
+                if viewModel.hasNutritionSnapshot {
+                    Text("הסיכום מחושב במכשיר מהיומן ומאגר המזונים. יעדי DRI והטבלה המלאה מתעדכנים בסנכרון (מאגר מזונים + מאפייני תזונה).")
                 } else {
-                    Text("הסיכום המלא מגיע מהשרת — כמו טבלת התזונה באתר. פריטים שעדיין לא סונכרנו עלולים לא להופיע שם.")
+                    Text("הסיכום מחושב במכשיר. לטבלת אחוזים מהמומלץ בכל הרכיבים, סנכרן כשה־API מוגדר (מוריד גם מאפייני תזונה).")
                 }
             } else if viewModel.estimatedLocalCalories != nil {
                 Text("הקלוריות המקומיות כוללות רק פריטים שנשמר בהם ערך קלוריות ל־100 גרם בעת ההוספה מהאפליקציה.")
@@ -396,7 +456,7 @@ struct DailyDiaryView: View {
                 Text(
                     viewModel.hasLocalFoodCatalog
                         ? "סנכרן את היומן כשהרשת זמינה. אם אין התאמות בשמות מול המאגר המקומי, הוסף פריטים מחיפוש או הגדר API."
-                        : "לסיכום מלא נדרש מאגר מזונים מקומי (catalog-items.php בסנכרון) או חיבור לשרת עם daily-nutrition-summary.php ב־api/v1."
+                        : "לסיכום מלא נדרש מאגר מזונים מקומי: הגדר API וסנכרן (מוריד catalog-items ומאפייני תזונה)."
                 )
             }
         }

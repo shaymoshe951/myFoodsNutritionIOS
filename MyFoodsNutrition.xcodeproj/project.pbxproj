@@ -27,6 +27,7 @@
 		BF0019 /* DailyNutritionSummaryDTO.swift in Sources */ = {isa = PBXBuildFile; fileRef = FR0019 /* DailyNutritionSummaryDTO.swift */; };
 		BF0020 /* FoodCatalogDTO.swift in Sources */ = {isa = PBXBuildFile; fileRef = FR0020 /* FoodCatalogDTO.swift */; };
 		BF0021 /* FoodCatalogItemRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = FR0021 /* FoodCatalogItemRecord.swift */; };
+		BF0022 /* NutritionSnapshotDTO.swift in Sources */ = {isa = PBXBuildFile; fileRef = FR0022 /* NutritionSnapshotDTO.swift */; };
 		BF0017 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = PKG001 /* GRDB */; };
 /* End PBXBuildFile section */
 
@@ -51,6 +52,7 @@
 		FR0019 /* DailyNutritionSummaryDTO.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DailyNutritionSummaryDTO.swift; sourceTree = "<group>"; };
 		FR0020 /* FoodCatalogDTO.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoodCatalogDTO.swift; sourceTree = "<group>"; };
 		FR0021 /* FoodCatalogItemRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoodCatalogItemRecord.swift; sourceTree = "<group>"; };
+		FR0022 /* NutritionSnapshotDTO.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NutritionSnapshotDTO.swift; sourceTree = "<group>"; };
 		PR0001 /* MyFoodsNutrition.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MyFoodsNutrition.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -106,6 +108,7 @@
 				FR0017 /* FoodSearchDTO.swift */,
 				FR0019 /* DailyNutritionSummaryDTO.swift */,
 				FR0020 /* FoodCatalogDTO.swift */,
+				FR0022 /* NutritionSnapshotDTO.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -264,6 +267,7 @@
 				BF0018 /* FoodSearchDTO.swift in Sources */,
 				BF0019 /* DailyNutritionSummaryDTO.swift in Sources */,
 				BF0020 /* FoodCatalogDTO.swift in Sources */,
+				BF0022 /* NutritionSnapshotDTO.swift in Sources */,
 				BF0005 /* DailyItemRecord.swift in Sources */,
 				BF0021 /* FoodCatalogItemRecord.swift in Sources */,
 				BF0006 /* Migrations.swift in Sources */,

@@ -288,6 +288,35 @@ final class AppDatabase {
         }
     }
 
+    // MARK: - Nutrition snapshot (`GET nutrition-attributes.php`)
+
+    func nutritionSnapshot() throws -> NutritionSnapshotResponse? {
+        try dbQueue.read { db in
+            guard let s = try String.fetchOne(
+                db,
+                sql: "SELECT value FROM sync_state WHERE key = ?",
+                arguments: ["nutrition_snapshot_json"]
+            ),
+                let data = s.data(using: .utf8)
+            else { return nil }
+            return try JSONDecoder().decode(NutritionSnapshotResponse.self, from: data)
+        }
+    }
+
+    func storeNutritionSnapshot(_ response: NutritionSnapshotResponse) throws {
+        let data = try JSONEncoder().encode(response)
+        guard let str = String(data: data, encoding: .utf8) else { return }
+        try dbQueue.write { db in
+            try db.execute(
+                sql: """
+                INSERT INTO sync_state (key, value) VALUES (?, ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                """,
+                arguments: ["nutrition_snapshot_json", str]
+            )
+        }
+    }
+
     /// Local search: same preprocessing as `nutrition_item_search()`; matching is LIKE + word tokens (SQLite has no MySQL `REGEXP`).
     /// `isExtended` rule matches the web: with `*` in the query, all items match; without `*`, only `isExtended == 0` first, then if no rows, repeat without that filter (`item_search.php` lines 68–96).
     func searchFoodCatalog(query raw: String) throws -> FoodSearchResponse {
@@ -352,9 +381,8 @@ final class AppDatabase {
         }
     }
 
-    /// Same nutrient aggregation as `daily-nutrition-summary.php` when diary rows resolve in `food_catalog_item`.
-    /// Rows without a catalog match still contribute **energy** if `energy_per_100` was stored when the item was added from search.
-    func localNutritionSummaryIfAvailable(date: String) throws -> DailyNutritionSummaryDTO? {
+    /// Aggregates diary + `food_catalog_item` locally (always includes unsynced rows). Optional `nutrition_snapshot_json` enables the full DRI table.
+    func localNutritionSummary(date: String, displayMode: DiaryDisplayMode) throws -> DailyNutritionSummaryDTO? {
         let rows = try itemsForDate(date)
         var arrNutValues: [String: Double] = [:]
         try dbQueue.read { db in
@@ -370,17 +398,8 @@ final class AppDatabase {
             }
         }
 
-        let mainKeys = ["energy", "protein", "carbohydrate", "total_lipid_fat", "dietary_fiber"]
-        var totals: [String: Double] = [:]
-        for k in mainKeys {
-            if let x = arrNutValues[k] {
-                totals[k] = (x * 10).rounded() / 10
-            }
-        }
-        if totals["dietary_fiber"] == nil, let f = arrNutValues["fiber"] {
-            totals["dietary_fiber"] = (f * 10).rounded() / 10
-        }
-        if totals.isEmpty {
+        let mainTotals = Self.buildMainTotalsDict(from: arrNutValues)
+        if mainTotals.isEmpty {
             return nil
         }
         let labelsHe: [String: String] = [
@@ -390,7 +409,104 @@ final class AppDatabase {
             "total_lipid_fat": "שומנים",
             "dietary_fiber": "סיבים תזונתיים",
         ]
-        return DailyNutritionSummaryDTO(date: date, totals: totals, labels_he: labelsHe)
+        guard let snapshot = try nutritionSnapshot() else {
+            return DailyNutritionSummaryDTO(date: date, totals: mainTotals, labels_he: labelsHe, nutrition_rows: nil)
+        }
+        let tableRows = Self.buildNutritionTableRows(
+            arrNutValues: arrNutValues,
+            snapshot: snapshot,
+            displayMode: displayMode
+        )
+        return DailyNutritionSummaryDTO(date: date, totals: mainTotals, labels_he: labelsHe, nutrition_rows: tableRows)
+    }
+
+    private static func buildMainTotalsDict(from arrNutValues: [String: Double]) -> [String: Double] {
+        let mainKeys = ["energy", "protein", "carbohydrate", "total_lipid_fat", "dietary_fiber"]
+        var totals: [String: Double] = [:]
+        for k in mainKeys {
+            if k == "dietary_fiber" {
+                if let x = arrNutValues["dietary_fiber"] ?? arrNutValues["fiber"] {
+                    totals[k] = (x * 10).rounded() / 10
+                }
+                continue
+            }
+            if let x = arrNutValues[k] {
+                totals[k] = (x * 10).rounded() / 10
+            }
+        }
+        return totals
+    }
+
+    private static let nutWeightUnitsToStandard: [String: Double] = [
+        "gram": 1,
+        "miliGram": 0.001,
+        "microGram": 1e-06,
+        "tspn": 4.2,
+    ]
+
+    private static let displayUnitLabelsHe: [String: String] = [
+        "gram": "גרם",
+        "miliGram": "מ\"ג",
+        "microGram": "מק\"ג",
+        "tspn": "כפיות סוכר",
+        "calories": "קלוריות",
+    ]
+
+    private static func nutrientScalar(for key: String, arr: [String: Double]) -> Double {
+        if key == "dietary_fiber" {
+            return arr["dietary_fiber"] ?? arr["fiber"] ?? 0
+        }
+        return arr[key] ?? 0
+    }
+
+    private static func calcPercDRI(raw: Double, goal: Double) -> Int {
+        guard goal > 0 else { return 0 }
+        return Int((raw / goal * 100.0).rounded())
+    }
+
+    private static func formatAmountText(nutValue: Double, displayUnit: String, nutrientKey: String) -> String {
+        let unitLabel = displayUnitLabelsHe[displayUnit] ?? displayUnit
+        if let div = nutWeightUnitsToStandard[displayUnit] {
+            let v = nutValue / (1e-9 + div)
+            let rounded = (v * 10).rounded() / 10
+            if rounded.rounded() == rounded {
+                return "\(Int(rounded)) \(unitLabel)"
+            }
+            return String(format: "%.1f %@", rounded, unitLabel)
+        }
+        if nutrientKey == "energy" {
+            return "\(Int(nutValue.rounded())) \(unitLabel)"
+        }
+        return String(format: "%.1f %@", nutValue, unitLabel)
+    }
+
+    private static func buildNutritionTableRows(
+        arrNutValues: [String: Double],
+        snapshot: NutritionSnapshotResponse,
+        displayMode: DiaryDisplayMode
+    ) -> [NutritionTableRow] {
+        let brief = displayMode == .brief
+        var out: [NutritionTableRow] = []
+        for key in snapshot.nutrient_column_order {
+            guard let attr = snapshot.attributes[key] else { continue }
+            let raw = nutrientScalar(for: key, arr: arrNutValues)
+            let goal = attr.dri_goal
+            let perc = calcPercDRI(raw: raw, goal: goal)
+            if brief {
+                guard goal >= 0, perc < 90 else { continue }
+            }
+            let amountText = formatAmountText(nutValue: raw, displayUnit: attr.display_unit, nutrientKey: key)
+            let percentCol: Int? = goal >= 0 ? perc : nil
+            out.append(
+                NutritionTableRow(
+                    nutrient_key: key,
+                    label_he: attr.label_he,
+                    amount_text: amountText,
+                    percent: percentCol
+                )
+            )
+        }
+        return out
     }
 
     /// Trim + collapse runs of whitespace (synced names often differ only by spaces).

@@ -94,20 +94,17 @@ final class APIClient {
         return try await perform(request, decode: FoodCatalogResponse.self, label: "fetchFoodCatalog")
     }
 
-    /// Totals for a calendar day from `table_daily_items` + `table_items_data` (server-side), matching the web diary table.
-    func dailyNutritionSummary(date: String) async throws -> DailyNutritionSummaryDTO {
+    /// DRI goals, Hebrew labels, and `table_items_data` column order for offline nutrition tables (`nutrition-attributes.php`).
+    func fetchNutritionAttributes() async throws -> NutritionSnapshotResponse {
         guard config.isConfigured else { throw APIError.notConfigured }
-        guard let url = URL(string: config.baseURL + "/daily-nutrition-summary.php") else { throw APIError.invalidURL }
+        guard let url = URL(string: config.baseURL + "/nutrition-attributes.php") else { throw APIError.invalidURL }
 
         var request = URLRequest(url: url)
         request.timeoutInterval = Self.requestTimeoutInterval
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpMethod = "GET"
         request.setValue("Bearer \(config.token)", forHTTPHeaderField: "Authorization")
-        let body: [String: String] = ["date": date]
-        request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        return try await perform(request, decode: DailyNutritionSummaryDTO.self, label: "dailyNutritionSummary")
+        return try await perform(request, decode: NutritionSnapshotResponse.self, label: "fetchNutritionAttributes")
     }
 
     private func perform<T: Decodable>(_ request: URLRequest, decode: T.Type, label: String) async throws -> T {
@@ -218,7 +215,7 @@ private extension APIClient {
         if p.hasSuffix("push.php") { return "push" }
         if p.hasSuffix("pull.php") { return "pull" }
         if p.hasSuffix("search-items.php") { return "search" }
-        if p.hasSuffix("daily-nutrition-summary.php") { return "dailyNutritionSummary" }
+        if p.hasSuffix("nutrition-attributes.php") { return "fetchNutritionAttributes" }
         if p.hasSuffix("catalog-items.php") { return "fetchFoodCatalog" }
         return (p as NSString).lastPathComponent
     }

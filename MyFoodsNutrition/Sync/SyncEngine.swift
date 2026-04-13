@@ -7,6 +7,8 @@ final class SyncEngine: ObservableObject {
     @Published private(set) var lastSyncedAt: Date?
     /// Set when `food_catalog_item` was replaced successfully (offline search / local day totals).
     @Published private(set) var lastFoodCatalogAt: Date?
+    /// Set when DRI / Hebrew labels snapshot was stored (`nutrition-attributes.php`).
+    @Published private(set) var lastNutritionSnapshotAt: Date?
 
     private let database: AppDatabase
     private let apiClient: APIClient
@@ -26,6 +28,7 @@ final class SyncEngine: ObservableObject {
         await flushPendingPushWhenOnline()
         await pullSilently()
         await syncFoodCatalogIfConfigured()
+        await syncNutritionSnapshotIfConfigured()
     }
 
     /// When network becomes available, retry pending uploads.
@@ -63,6 +66,7 @@ final class SyncEngine: ObservableObject {
             throw error
         }
         await syncFoodCatalogIfConfigured()
+        await syncNutritionSnapshotIfConfigured()
         lastSyncedAt = Date()
     }
 
@@ -162,6 +166,19 @@ final class SyncEngine: ObservableObject {
             AppLog.sync.info("syncFoodCatalog: stored \(cat.items.count) item(s)")
         } catch {
             AppLog.sync.error("syncFoodCatalog failed: \(String(describing: error))")
+        }
+    }
+
+    /// Stores DRI goals and column order for the local nutrition table (same data as `updateDailyNutValues.php` metadata).
+    private func syncNutritionSnapshotIfConfigured() async {
+        guard apiClient.config.isConfigured else { return }
+        do {
+            let snap = try await apiClient.fetchNutritionAttributes()
+            try database.storeNutritionSnapshot(snap)
+            lastNutritionSnapshotAt = Date()
+            AppLog.sync.info("syncNutritionSnapshot: stored \(snap.attributes.count) attribute(s)")
+        } catch {
+            AppLog.sync.error("syncNutritionSnapshot failed: \(String(describing: error))")
         }
     }
 }

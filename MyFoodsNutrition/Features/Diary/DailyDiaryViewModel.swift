@@ -47,10 +47,10 @@ final class DailyDiaryViewModel: ObservableObject {
     @Published private(set) var nutritionSummary: DailyNutritionSummaryDTO?
     @Published private(set) var nutritionSummaryLoading = false
     @Published private(set) var nutritionSummaryFailed = false
-    /// True when `nutritionSummary` was computed from the on-device `food_catalog_item` table (offline / fallback).
-    @Published private(set) var nutritionSummaryFromLocalCatalog = false
     /// True after at least one food-catalog sync populated `food_catalog_item`.
     @Published private(set) var hasLocalFoodCatalog = false
+    /// True when `nutrition-attributes.php` was synced into SQLite (full DRI table).
+    @Published private(set) var hasNutritionSnapshot = false
 
     /// Items to show for the current date and display mode (תקציר / מלא).
     func displayedItems(mode: DiaryDisplayMode) -> [DailyItemRecord] {
@@ -120,6 +120,7 @@ final class DailyDiaryViewModel: ObservableObject {
         do {
             items = try database.itemsForDate(dateKey)
             hasLocalFoodCatalog = ((try? database.foodCatalogItemCount()) ?? 0) > 0
+            hasNutritionSnapshot = (try? database.nutritionSnapshot()) != nil
             errorMessage = nil
             nutritionRefreshToken += 1
         } catch {
@@ -127,57 +128,30 @@ final class DailyDiaryViewModel: ObservableObject {
         }
     }
 
-    /// Loads daily totals from the server when possible (full macros). Falls back to the local food catalog, then to `estimatedLocalCalories` in the UI.
-    func refreshNutritionSummary(api: APIClient) async {
-        nutritionSummaryFromLocalCatalog = false
+    /// Computes totals and the nutrition table from SQLite (`food_catalog_item` + optional DRI snapshot). Same תקציר/מלא rules as the website.
+    func refreshNutritionSummary(displayMode: DiaryDisplayMode) async {
         nutritionSummaryLoading = true
         nutritionSummaryFailed = false
         defer { nutritionSummaryLoading = false }
 
         let dayRows = (try? database.itemsForDate(dateKey)) ?? []
-        // No diary rows ⇒ empty summary (not an error). Avoids failing when the server is unreachable.
         if dayRows.isEmpty {
             nutritionSummary = DailyNutritionSummaryDTO(date: dateKey, totals: [:])
             return
         }
 
-        // New/edited/deleted rows not yet pushed: `daily-nutrition-summary.php` reads the server DB, which
-        // does not include them — using it would show stale totals. Prefer local catalog math until sync completes.
-        let hasUnsyncedDiaryRows = dayRows.contains { $0.needsPush }
-        if hasUnsyncedDiaryRows {
-            if let local = try? database.localNutritionSummaryIfAvailable(date: dateKey) {
+        do {
+            if let local = try database.localNutritionSummary(date: dateKey, displayMode: displayMode) {
                 nutritionSummary = local
-                nutritionSummaryFromLocalCatalog = true
+                nutritionSummaryFailed = false
                 return
             }
+        } catch {
             nutritionSummary = nil
-            nutritionSummaryFailed = estimatedLocalCalories == nil
+            nutritionSummaryFailed = true
             return
         }
 
-        if api.config.isConfigured {
-            do {
-                nutritionSummary = try await api.dailyNutritionSummary(date: dateKey)
-                return
-            } catch {
-                if let local = try? database.localNutritionSummaryIfAvailable(date: dateKey) {
-                    nutritionSummary = local
-                    nutritionSummaryFromLocalCatalog = true
-                    nutritionSummaryFailed = false
-                    return
-                }
-                nutritionSummary = nil
-                nutritionSummaryFailed = estimatedLocalCalories == nil
-                return
-            }
-        }
-
-        if let local = try? database.localNutritionSummaryIfAvailable(date: dateKey) {
-            nutritionSummary = local
-            nutritionSummaryFromLocalCatalog = true
-            nutritionSummaryFailed = false
-            return
-        }
         nutritionSummary = nil
         nutritionSummaryFailed = estimatedLocalCalories == nil
     }

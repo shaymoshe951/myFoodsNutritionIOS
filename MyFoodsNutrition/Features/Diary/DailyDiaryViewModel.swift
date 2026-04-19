@@ -90,6 +90,8 @@ final class DailyDiaryViewModel: ObservableObject {
     @Published private(set) var searchPreviewGrams: Double = 100
     /// Incremented when «הוסף»/«אוסף» + single unambiguous search causes an automatic add, so the view can clear the text field.
     @Published private(set) var foodSearchAutoSubmitSucceededTick: Int = 0
+    /// Incremented when «נקה» is recognized as a clear-only line so the view can empty the field and reset dictation.
+    @Published private(set) var foodSearchClearCommandTick: Int = 0
 
     private let database: AppDatabase
     private var searchDebounceTask: Task<Void, Never>?
@@ -161,6 +163,12 @@ final class DailyDiaryViewModel: ObservableObject {
     /// Debounced live search — same flow as `updateQRSuggestions()` on the site; uses the local catalog when synced.
     func onFoodQueryChanged(_ text: String, api: APIClient) {
         searchDebounceTask?.cancel()
+        if Self.fieldTriggersClearCommand(text) {
+            searchSuggestions = []
+            searchPreviewGrams = 100
+            foodSearchClearCommandTick += 1
+            return
+        }
         let trimmed = Self.normalizedSearchInput(text)
         if trimmed.isEmpty {
             searchSuggestions = []
@@ -195,6 +203,12 @@ final class DailyDiaryViewModel: ObservableObject {
     func applyFoodQueryNow(_ text: String, api: APIClient, rawFieldTextForSubmitCue: String? = nil) async {
         searchDebounceTask?.cancel()
         searchDebounceTask = nil
+        if Self.fieldTriggersClearCommand(text) {
+            searchSuggestions = []
+            searchPreviewGrams = 100
+            foodSearchClearCommandTick += 1
+            return
+        }
         let trimmed = Self.normalizedSearchInput(text)
         if trimmed.isEmpty {
             searchSuggestions = []
@@ -220,15 +234,16 @@ final class DailyDiaryViewModel: ObservableObject {
         Self.normalizedSearchInput(raw)
     }
 
-    /// Speech text for the field: bidi + digit cleanup only — keeps «הוסף»/«אוסף» visible; search still uses `normalizedSearchInput`.
+    /// Speech text for the field: bidi + digit cleanup only — keeps «הוסף»/«אוסף»/«נקה» visible; search still uses `normalizedSearchInput`.
     func displayQueryFromSpeech(_ raw: String) -> String {
         Self.strippedBidiAndDigits(raw).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /// Strips invisible bidi/format characters dictation often inserts; maps Arabic‑Indic digits to ASCII so `FoodSearchQueryParser` digit rules match speech; removes «הוסף»/«אוסף» so they do not affect catalog search.
+    /// Strips invisible bidi/format characters dictation often inserts; maps Arabic‑Indic digits to ASCII so `FoodSearchQueryParser` digit rules match speech; removes «הוסף»/«אוסף» and «נקה» so they do not affect catalog search.
     private static func normalizedSearchInput(_ text: String) -> String {
         let trimmed = strippedBidiAndDigits(text).trimmingCharacters(in: .whitespacesAndNewlines)
-        return removingHebrewSubmitCueTokens(trimmed)
+        let withoutSubmit = removingHebrewSubmitCueTokens(trimmed)
+        return removingHebrewClearCueTokens(withoutSubmit)
     }
 
     private static func strippedBidiAndDigits(_ text: String) -> String {
@@ -241,6 +256,8 @@ final class DailyDiaryViewModel: ObservableObject {
 
     /// Words that mean “add” in speech (and common misrecognitions); stripped before SQL/API search.
     private static let hebrewSubmitCueTokens = ["הוסף", "אוסף"]
+    /// Voice/command word for clearing the search line; stripped like submit cues when mixed with a food query.
+    private static let hebrewClearCueTokens = ["נקה"]
 
     private static func removingHebrewSubmitCueTokens(_ s: String) -> String {
         var t = s
@@ -253,6 +270,27 @@ final class DailyDiaryViewModel: ObservableObject {
         let ns = t as NSString
         t = ws.stringByReplacingMatches(in: t, options: [], range: NSRange(location: 0, length: ns.length), withTemplate: " ")
         return t.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func removingHebrewClearCueTokens(_ s: String) -> String {
+        var t = s
+        for tok in hebrewClearCueTokens {
+            while t.contains(tok) {
+                t = t.replacingOccurrences(of: tok, with: " ")
+            }
+        }
+        let ws = try! NSRegularExpression(pattern: "\\s+", options: [])
+        let ns = t as NSString
+        t = ws.stringByReplacingMatches(in: t, options: [], range: NSRange(location: 0, length: ns.length), withTemplate: " ")
+        return t.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// True when the field contains «נקה» and nothing else remains for search after stripping cues (typed or dictated).
+    private static func fieldTriggersClearCommand(_ raw: String) -> Bool {
+        let rawTrim = strippedBidiAndDigits(raw).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !rawTrim.isEmpty else { return false }
+        guard hebrewClearCueTokens.contains(where: { rawTrim.contains($0) }) else { return false }
+        return normalizedSearchInput(raw).isEmpty
     }
 
     private static func fieldContainsSubmitCue(_ raw: String) -> Bool {
@@ -319,10 +357,15 @@ final class DailyDiaryViewModel: ObservableObject {
         }
     }
 
-    /// Same rules as `qrSearchSubmitted()` in `index.php`.
-    func submitFoodQueryLine(_ raw: String, api: APIClient) async throws {
+    /// Same rules as `qrSearchSubmitted()` in `index.php`. Returns whether a diary row was inserted (false for empty input or a «נקה» clear line).
+    @discardableResult
+    func submitFoodQueryLine(_ raw: String, api: APIClient) async throws -> Bool {
+        if Self.fieldTriggersClearCommand(raw) {
+            foodSearchClearCommandTick += 1
+            return false
+        }
         let trimmed = Self.normalizedSearchInput(raw)
-        guard !trimmed.isEmpty else { return }
+        guard !trimmed.isEmpty else { return false }
         if ((try? database.foodCatalogItemCount()) ?? 0) == 0, !api.config.isConfigured {
             throw DiaryEntryError.searchNotConfigured
         }
@@ -364,6 +407,7 @@ final class DailyDiaryViewModel: ObservableObject {
         let time = Self.itmTimeNow()
         addItem(name: itemName, quantity: numDesired, meal: "", time: time, energyPer100: picked.energy)
         searchSuggestions = []
+        return true
     }
 
     func addItem(name: String, quantity: Int, meal: String, time: String, energyPer100: Double? = nil) {

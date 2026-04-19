@@ -5,6 +5,7 @@ struct DailyDiaryView: View {
     @StateObject private var viewModel: DailyDiaryViewModel
     @AppStorage("diaryDisplayMode") private var displayModeRaw: String = DiaryDisplayMode.brief.rawValue
     @State private var queryLine = ""
+    @FocusState private var foodSearchFieldFocused: Bool
     @StateObject private var foodSpeech = FoodSearchSpeechService()
     @State private var isSyncingSheet = false
     @State private var syncAlert: String?
@@ -139,6 +140,7 @@ struct DailyDiaryView: View {
                 Section {
                     HStack(alignment: .center, spacing: 10) {
                         TextField("מה אכלתם היום?", text: foodSearchQueryBinding)
+                            .focused($foodSearchFieldFocused)
                             .textFieldStyle(.roundedBorder)
                             .multilineTextAlignment(.leading)
                             .submitLabel(.done)
@@ -195,7 +197,7 @@ struct DailyDiaryView: View {
                 } header: {
                     Text("חיפוש והוספה")
                 } footer: {
-                    Text("שורה אחת: שם מזון + מספר גרם (למשל «חלב 200»). ארוחה נקבעת אוטומטית לפי שעת ההוספה, כמו בשרת.")
+                    Text("שורה אחת: שם מזון + מספר גרם (למשל «חלב 200»). «הוסף»/«אוסף» עם התאמה חד־משמעית מוסיפים כמו Enter; «נקה» מרוקן את השורה ומאפס הקלטה בקול. ארוחה נקבעת אוטומטית לפי שעת ההוספה, כמו בשרת.")
                 }
 
                 if viewModel.items.isEmpty {
@@ -372,6 +374,13 @@ struct DailyDiaryView: View {
                 queryLine = ""
                 viewModel.onFoodQueryChanged("", api: appModel.apiClient)
                 foodSpeech.resetStreamingRecognitionAfterCommittedLine()
+                focusFoodSearchField()
+            }
+            .onChange(of: viewModel.foodSearchClearCommandTick) { _, _ in
+                queryLine = ""
+                viewModel.onFoodQueryChanged("", api: appModel.apiClient)
+                foodSpeech.resetStreamingRecognitionAfterCommittedLine()
+                focusFoodSearchField()
             }
             .onChange(of: appModel.syncEngine.lastSyncedAt) { _, _ in
                 viewModel.load()
@@ -516,6 +525,14 @@ struct DailyDiaryView: View {
         return "אין פריטים להצגה"
     }
 
+    /// Returns keyboard focus to the food line field after a successful add so the next item can be typed immediately.
+    private func focusFoodSearchField() {
+        Task { @MainActor in
+            await Task.yield()
+            foodSearchFieldFocused = true
+        }
+    }
+
     @ViewBuilder
     private func suggestionLabel(_ item: FoodSearchItemDTO) -> some View {
         let g = viewModel.searchPreviewGrams
@@ -556,10 +573,12 @@ struct DailyDiaryView: View {
         let raw = (explicitLine ?? queryLine).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !raw.isEmpty else { return }
         do {
-            try await viewModel.submitFoodQueryLine(raw, api: appModel.apiClient)
+            let added = try await viewModel.submitFoodQueryLine(raw, api: appModel.apiClient)
+            guard added else { return }
             queryLine = ""
             viewModel.onFoodQueryChanged("", api: appModel.apiClient)
             foodSpeech.resetStreamingRecognitionAfterCommittedLine()
+            focusFoodSearchField()
         } catch let e as DiaryEntryError {
             submitAlert = e.localizedDescription
         } catch {

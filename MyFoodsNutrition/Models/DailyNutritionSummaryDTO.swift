@@ -19,12 +19,21 @@ struct DailyNutritionSummaryDTO: Decodable {
     var labels_he: [String: String]?
     /// Full table for the day; filtered when `display_type` is `butBrief` (nutrients under 90% of DRI only).
     var nutrition_rows: [NutritionTableRow]?
+    /// When DRI goals are known (local snapshot or API): nutrient key → % of recommended intake for the main strip (`energy`, `protein`, …).
+    var dri_percent_by_key: [String: Int]?
 
-    init(date: String, totals: [String: Double], labels_he: [String: String]? = nil, nutrition_rows: [NutritionTableRow]? = nil) {
+    init(
+        date: String,
+        totals: [String: Double],
+        labels_he: [String: String]? = nil,
+        nutrition_rows: [NutritionTableRow]? = nil,
+        dri_percent_by_key: [String: Int]? = nil
+    ) {
         self.date = date
         self.totals = totals
         self.labels_he = labels_he
         self.nutrition_rows = nutrition_rows
+        self.dri_percent_by_key = dri_percent_by_key
     }
 
     static let displayOrder = [

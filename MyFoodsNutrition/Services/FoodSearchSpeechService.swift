@@ -2,6 +2,12 @@ import AVFoundation
 import Foundation
 import Speech
 
+#if DEBUG
+private func foodSearchClearDebugLog(_ message: String) {
+    print("[FoodSearchClear] speech: \(message)")
+}
+#endif
+
 /// Apple on-device/server speech recognition first; on low confidence or failure, sends recorded audio to Whisper (same flow as `personal_assistant_app` `TranscriptionService`).
 @MainActor
 final class FoodSearchSpeechService: NSObject, ObservableObject {
@@ -59,6 +65,21 @@ final class FoodSearchSpeechService: NSObject, ObservableObject {
 
         let format = audioEngine.inputNode.outputFormat(forBus: 0)
         wavAccumulator = WavAccumulator(sampleRate: format.sampleRate, channelCount: format.channelCount)
+    }
+
+    /// «נקה» / clear command: drop accumulated recognition + WAV; if Whisper is running, cancel the whole session.
+    func resetBuffersForClearCommand() {
+        #if DEBUG
+        foodSearchClearDebugLog("resetBuffersForClearCommand phase=\(String(describing: phase))")
+        #endif
+        switch phase {
+        case .listening:
+            resetStreamingRecognitionAfterCommittedLine()
+        case .transcribingRemote:
+            cancelSession()
+        case .idle:
+            break
+        }
     }
 
     /// - Parameters:

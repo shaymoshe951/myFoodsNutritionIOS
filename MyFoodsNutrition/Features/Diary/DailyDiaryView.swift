@@ -25,10 +25,34 @@ struct DailyDiaryView: View {
         Binding(
             get: { queryLine },
             set: { newValue in
+                #if DEBUG
+                let prevLen = queryLine.count
+                #endif
                 queryLine = newValue
                 viewModel.onFoodQueryChanged(newValue, api: appModel.apiClient)
+                let shouldClear = viewModel.isFoodSearchClearOnlyLine(newValue)
+                #if DEBUG
+                print("[FoodSearchClear] binding set prevLen=\(prevLen) newLen=\(newValue.count) reflecting=\(String(reflecting: newValue)) shouldClear=\(shouldClear)")
+                #endif
+                if shouldClear {
+                    #if DEBUG
+                    print("[FoodSearchClear] binding -> syncClearFoodSearchFieldFromCommand()")
+                    #endif
+                    syncClearFoodSearchFieldFromCommand()
+                }
             }
         )
+    }
+
+    /// Clears the line, search suggestions, dictation buffer, and refocuses — must run on the main thread when «נקה» is recognized (do not rely on `onChange` of a tick alone).
+    private func syncClearFoodSearchFieldFromCommand() {
+        #if DEBUG
+        print("[FoodSearchClear] syncClearFoodSearchFieldFromCommand() phase=\(String(describing: foodSpeech.phase))")
+        #endif
+        queryLine = ""
+        viewModel.onFoodQueryChanged("", api: appModel.apiClient)
+        foodSpeech.resetBuffersForClearCommand()
+        focusFoodSearchField()
     }
 
     init(database: AppDatabase) {
@@ -74,8 +98,12 @@ struct DailyDiaryView: View {
         return groups
     }
 
+    /// `ScrollViewReader` target so focusing the food field scrolls it toward the top (above the keyboard).
+    private static let foodSearchScrollAnchorID = "diaryFoodSearchField"
+
     var body: some View {
         NavigationStack {
+            ScrollViewReader { scrollProxy in
             List {
                 Section {
                     DatePicker("תאריך", selection: $viewModel.selectedDate, displayedComponents: .date)
@@ -177,6 +205,7 @@ struct DailyDiaryView: View {
                         }
                         .frame(width: 36, height: 36)
                     }
+                    .id(Self.foodSearchScrollAnchorID)
 
                     if !viewModel.searchSuggestions.isEmpty {
                         ForEach(viewModel.searchSuggestions) { item in
@@ -197,7 +226,7 @@ struct DailyDiaryView: View {
                 } header: {
                     Text("חיפוש והוספה")
                 } footer: {
-                    Text("שורה אחת: שם מזון + מספר גרם (למשל «חלב 200»). «הוסף»/«אוסף» עם התאמה חד־משמעית מוסיפים כמו Enter; «נקה» מרוקן את השורה ומאפס הקלטה בקול. ארוחה נקבעת אוטומטית לפי שעת ההוספה, כמו בשרת.")
+                    Text("שורה אחת: שם מזון + מספר גרם (למשל «חלב 200»). «הוסף»/«אוסף» עם התאמה חד־משמעית מוסיפים כמו Enter; «נקה» לבד או אחרי רווח בסוף השורה מרוקן את כל השורה ומאפס הקלטה בקול. ארוחה נקבעת אוטומטית לפי שעת ההוספה, כמו בשרת.")
                 }
 
                 if viewModel.items.isEmpty {
@@ -286,6 +315,16 @@ struct DailyDiaryView: View {
                             .multilineTextAlignment(.leading)
                     }
                 }
+            }
+            .onChange(of: foodSearchFieldFocused) { _, focused in
+                guard focused else { return }
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(50))
+                    withAnimation(.easeInOut(duration: 0.28)) {
+                        scrollProxy.scrollTo(Self.foodSearchScrollAnchorID, anchor: UnitPoint(x: 0.5, y: 0.25))
+                    }
+                }
+            }
             }
             .navigationTitle("יומן יומי")
             .toolbar {
@@ -446,17 +485,31 @@ struct DailyDiaryView: View {
         } else {
             let order = DailyNutritionSummaryDTO.displayOrder
             if let cal = s.totals["energy"] {
-                Text("\(Self.formatNutInt(cal)) קלוריות")
-                    .font(.title3.weight(.semibold))
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("\(Self.formatNutInt(cal)) קלוריות")
+                        .font(.title3.weight(.semibold))
+                    if let p = s.dri_percent_by_key?["energy"] {
+                        Text("\(p)% מהמומלץ")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             ForEach(Array(order.filter { $0 != "energy" }), id: \.self) { key in
                 if let v = s.totals[key] {
-                    HStack {
+                    HStack(alignment: .firstTextBaseline) {
                         Text(s.labels_he?[key] ?? key)
                             .foregroundStyle(.secondary)
                         Spacer()
-                        Text(Self.formatNutValue(v, key: key))
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text(Self.formatNutValue(v, key: key))
+                            if let p = s.dri_percent_by_key?[key] {
+                                Text("\(p)% מהמומלץ")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
                     }
                     .font(.subheadline)
                 }
@@ -550,15 +603,24 @@ struct DailyDiaryView: View {
         case .idle:
             foodSpeech.startListening(
                 onPartial: { text in
+                    if viewModel.isFoodSearchClearOnlyLine(text) {
+                        syncClearFoodSearchFieldFromCommand()
+                        return
+                    }
                     queryLine = viewModel.displayQueryFromSpeech(text)
                     viewModel.onFoodQueryChanged(text, api: appModel.apiClient)
                 },
                 onFinished: { result in
                     switch result {
                     case let .success(text):
-                        queryLine = viewModel.displayQueryFromSpeech(text)
-                        Task {
-                            await viewModel.applyFoodQueryNow(text, api: appModel.apiClient)
+                        Task { @MainActor in
+                            if viewModel.isFoodSearchClearOnlyLine(text) {
+                                await viewModel.applyFoodQueryNow(text, api: appModel.apiClient)
+                                syncClearFoodSearchFieldFromCommand()
+                            } else {
+                                queryLine = viewModel.displayQueryFromSpeech(text)
+                                await viewModel.applyFoodQueryNow(text, api: appModel.apiClient)
+                            }
                         }
                     case let .failure(err):
                         submitAlert = err.localizedDescription
@@ -574,11 +636,14 @@ struct DailyDiaryView: View {
         guard !raw.isEmpty else { return }
         do {
             let added = try await viewModel.submitFoodQueryLine(raw, api: appModel.apiClient)
-            guard added else { return }
-            queryLine = ""
-            viewModel.onFoodQueryChanged("", api: appModel.apiClient)
-            foodSpeech.resetStreamingRecognitionAfterCommittedLine()
-            focusFoodSearchField()
+            if added {
+                queryLine = ""
+                viewModel.onFoodQueryChanged("", api: appModel.apiClient)
+                foodSpeech.resetStreamingRecognitionAfterCommittedLine()
+                focusFoodSearchField()
+            } else if viewModel.isFoodSearchClearOnlyLine(raw) {
+                syncClearFoodSearchFieldFromCommand()
+            }
         } catch let e as DiaryEntryError {
             submitAlert = e.localizedDescription
         } catch {

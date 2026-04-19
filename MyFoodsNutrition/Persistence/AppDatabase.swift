@@ -410,14 +410,21 @@ final class AppDatabase {
             "dietary_fiber": "סיבים תזונתיים",
         ]
         guard let snapshot = try nutritionSnapshot() else {
-            return DailyNutritionSummaryDTO(date: date, totals: mainTotals, labels_he: labelsHe, nutrition_rows: nil)
+            return DailyNutritionSummaryDTO(date: date, totals: mainTotals, labels_he: labelsHe, nutrition_rows: nil, dri_percent_by_key: nil)
         }
         let tableRows = Self.buildNutritionTableRows(
             arrNutValues: arrNutValues,
             snapshot: snapshot,
             displayMode: displayMode
         )
-        return DailyNutritionSummaryDTO(date: date, totals: mainTotals, labels_he: labelsHe, nutrition_rows: tableRows)
+        let mainPercents = Self.buildMainDriPercents(arrNutValues: arrNutValues, snapshot: snapshot)
+        return DailyNutritionSummaryDTO(
+            date: date,
+            totals: mainTotals,
+            labels_he: labelsHe,
+            nutrition_rows: tableRows,
+            dri_percent_by_key: mainPercents.isEmpty ? nil : mainPercents
+        )
     }
 
     private static func buildMainTotalsDict(from arrNutValues: [String: Double]) -> [String: Double] {
@@ -462,6 +469,20 @@ final class AppDatabase {
     private static func calcPercDRI(raw: Double, goal: Double) -> Int {
         guard goal > 0 else { return 0 }
         return Int((raw / goal * 100.0).rounded())
+    }
+
+    /// % of DRI for the main summary line (always includes the main macros when goals exist; independent of `butBrief` table filtering).
+    private static func buildMainDriPercents(arrNutValues: [String: Double], snapshot: NutritionSnapshotResponse) -> [String: Int] {
+        let mainKeys = ["energy", "protein", "carbohydrate", "total_lipid_fat", "dietary_fiber"]
+        var out: [String: Int] = [:]
+        for key in mainKeys {
+            guard let attr = snapshot.attributes[key] else { continue }
+            let goal = attr.dri_goal
+            guard goal >= 0 else { continue }
+            let raw = nutrientScalar(for: key, arr: arrNutValues)
+            out[key] = calcPercDRI(raw: raw, goal: goal)
+        }
+        return out
     }
 
     private static func formatAmountText(nutValue: Double, displayUnit: String, nutrientKey: String) -> String {

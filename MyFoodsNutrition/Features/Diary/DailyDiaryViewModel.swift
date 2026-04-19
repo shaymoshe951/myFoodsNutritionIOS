@@ -1,5 +1,18 @@
 import Foundation
 
+#if DEBUG
+/// Traces «נקה» clear-command detection in Xcode console (filter: `FoodSearchClear`).
+private enum FoodSearchClearDebugLog {
+    static func unicodeScalarsHex(_ s: String) -> String {
+        s.unicodeScalars.map { String(format: "U+%04X", $0.value) }.joined(separator: " ")
+    }
+
+    static func log(_ message: String) {
+        print("[FoodSearchClear] \(message)")
+    }
+}
+#endif
+
 enum DiaryEntryError: LocalizedError {
     case needsGramAmount
     case pickExactFood
@@ -164,6 +177,9 @@ final class DailyDiaryViewModel: ObservableObject {
     func onFoodQueryChanged(_ text: String, api: APIClient) {
         searchDebounceTask?.cancel()
         if Self.fieldTriggersClearCommand(text) {
+            #if DEBUG
+            FoodSearchClearDebugLog.log("onFoodQueryChanged: clear branch tick -> \(foodSearchClearCommandTick + 1)")
+            #endif
             searchSuggestions = []
             searchPreviewGrams = 100
             foodSearchClearCommandTick += 1
@@ -204,6 +220,9 @@ final class DailyDiaryViewModel: ObservableObject {
         searchDebounceTask?.cancel()
         searchDebounceTask = nil
         if Self.fieldTriggersClearCommand(text) {
+            #if DEBUG
+            FoodSearchClearDebugLog.log("applyFoodQueryNow: clear branch tick -> \(foodSearchClearCommandTick + 1)")
+            #endif
             searchSuggestions = []
             searchPreviewGrams = 100
             foodSearchClearCommandTick += 1
@@ -234,6 +253,11 @@ final class DailyDiaryViewModel: ObservableObject {
         Self.normalizedSearchInput(raw)
     }
 
+    /// True when the field is only a «נקה»/«תנקה»/… clear command (same rules as internal clear handling). Used by the view to clear the `TextField` synchronously.
+    func isFoodSearchClearOnlyLine(_ raw: String) -> Bool {
+        Self.fieldTriggersClearCommand(raw)
+    }
+
     /// Speech text for the field: bidi + digit cleanup only — keeps «הוסף»/«אוסף»/«נקה» visible; search still uses `normalizedSearchInput`.
     func displayQueryFromSpeech(_ raw: String) -> String {
         Self.strippedBidiAndDigits(raw).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -241,14 +265,15 @@ final class DailyDiaryViewModel: ObservableObject {
 
     /// Strips invisible bidi/format characters dictation often inserts; maps Arabic‑Indic digits to ASCII so `FoodSearchQueryParser` digit rules match speech; removes «הוסף»/«אוסף» and «נקה» so they do not affect catalog search.
     private static func normalizedSearchInput(_ text: String) -> String {
-        let trimmed = strippedBidiAndDigits(text).trimmingCharacters(in: .whitespacesAndNewlines)
+        let nfc = text.precomposedStringWithCanonicalMapping
+        let trimmed = strippedBidiAndDigits(nfc).trimmingCharacters(in: .whitespacesAndNewlines)
         let withoutSubmit = removingHebrewSubmitCueTokens(trimmed)
         return removingHebrewClearCueTokens(withoutSubmit)
     }
 
     private static func strippedBidiAndDigits(_ text: String) -> String {
         var s = text
-        for u in ["\u{200E}", "\u{200F}", "\u{FEFF}", "\u{202A}", "\u{202B}", "\u{202C}", "\u{2066}", "\u{2067}", "\u{2068}", "\u{2069}"] {
+        for u in ["\u{200E}", "\u{200F}", "\u{FEFF}", "\u{200C}", "\u{200D}", "\u{202A}", "\u{202B}", "\u{202C}", "\u{2066}", "\u{2067}", "\u{2068}", "\u{2069}"] {
             s = s.replacingOccurrences(of: u, with: "")
         }
         return latinDigitsToASCII(s)
@@ -256,8 +281,13 @@ final class DailyDiaryViewModel: ObservableObject {
 
     /// Words that mean “add” in speech (and common misrecognitions); stripped before SQL/API search.
     private static let hebrewSubmitCueTokens = ["הוסף", "אוסף"]
-    /// Voice/command word for clearing the search line; stripped like submit cues when mixed with a food query.
-    private static let hebrewClearCueTokens = ["נקה"]
+    /// Voice/command phrases for clearing the search line; stripped like submit cues when mixed with a food query.
+    /// **Order of removal is longest-first** so e.g. «תנקה» is not destroyed by removing the substring «נקה» first (which would leave stray «ת»).
+    private static let hebrewClearCueTokens = ["נקה", "תנקה", "נכה", "לנקות"]
+
+    private static var hebrewClearCueTokensLongestFirst: [String] {
+        hebrewClearCueTokens.sorted { $0.count > $1.count }
+    }
 
     private static func removingHebrewSubmitCueTokens(_ s: String) -> String {
         var t = s
@@ -274,7 +304,7 @@ final class DailyDiaryViewModel: ObservableObject {
 
     private static func removingHebrewClearCueTokens(_ s: String) -> String {
         var t = s
-        for tok in hebrewClearCueTokens {
+        for tok in hebrewClearCueTokensLongestFirst {
             while t.contains(tok) {
                 t = t.replacingOccurrences(of: tok, with: " ")
             }
@@ -285,12 +315,88 @@ final class DailyDiaryViewModel: ObservableObject {
         return t.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /// True when the field contains «נקה» and nothing else remains for search after stripping cues (typed or dictated).
+    /// Collapses internal runs of spaces/newlines so typed/dictated «נקה» matches literals even with odd spacing.
+    private static func collapseWhitespaceForCueMatch(_ s: String) -> String {
+        let ws = try! NSRegularExpression(pattern: "\\s+", options: [])
+        let ns = s as NSString
+        let t = ws.stringByReplacingMatches(in: s, options: [], range: NSRange(location: 0, length: ns.length), withTemplate: " ")
+        return t.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// True when the line ends with a clear command as its **own word** (space before it). Clears the whole field — e.g. «שקד נקה» means clear, not «נקה» as substring inside one token («שקדנקה» is ignored).
+    private static func hasTrailingWholeWordClearCommand(_ collapsed: String) -> Bool {
+        for tok in hebrewClearCueTokensLongestFirst {
+            guard collapsed.hasSuffix(tok) else { continue }
+            let withoutTok = String(collapsed.dropLast(tok.count))
+            if withoutTok.isEmpty { return true }
+            guard let last = withoutTok.last else { return true }
+            return last.isWhitespace
+        }
+        return false
+    }
+
+    /// True when the field contains a clear cue and nothing else remains for search after stripping cues (typed or dictated).
     private static func fieldTriggersClearCommand(_ raw: String) -> Bool {
-        let rawTrim = strippedBidiAndDigits(raw).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !rawTrim.isEmpty else { return false }
-        guard hebrewClearCueTokens.contains(where: { rawTrim.contains($0) }) else { return false }
-        return normalizedSearchInput(raw).isEmpty
+        #if DEBUG
+        FoodSearchClearDebugLog.log(
+            "fieldTriggersClear INPUT count=\(raw.count) reflecting=\(String(reflecting: raw)) scalars=\(FoodSearchClearDebugLog.unicodeScalarsHex(raw))"
+        )
+        #endif
+        let nfc = raw.precomposedStringWithCanonicalMapping
+        let rawTrim = strippedBidiAndDigits(nfc).trimmingCharacters(in: .whitespacesAndNewlines)
+        #if DEBUG
+        FoodSearchClearDebugLog.log(
+            "fieldTriggersClear after strip+trim count=\(rawTrim.count) reflecting=\(String(reflecting: rawTrim)) scalars=\(FoodSearchClearDebugLog.unicodeScalarsHex(rawTrim))"
+        )
+        #endif
+        guard !rawTrim.isEmpty else {
+            #if DEBUG
+            FoodSearchClearDebugLog.log("fieldTriggersClear -> false (empty after trim)")
+            #endif
+            return false
+        }
+
+        let collapsed = collapseWhitespaceForCueMatch(rawTrim)
+        #if DEBUG
+        FoodSearchClearDebugLog.log(
+            "fieldTriggersClear collapsed reflecting=\(String(reflecting: collapsed)) scalars=\(FoodSearchClearDebugLog.unicodeScalarsHex(collapsed))"
+        )
+        #endif
+        for tok in hebrewClearCueTokensLongestFirst {
+            if collapsed == tok {
+                #if DEBUG
+                FoodSearchClearDebugLog.log("fieldTriggersClear -> true (exact match token=\(String(reflecting: tok)))")
+                #endif
+                return true
+            }
+        }
+
+        if hasTrailingWholeWordClearCommand(collapsed) {
+            #if DEBUG
+            FoodSearchClearDebugLog.log("fieldTriggersClear -> true (trailing clear word, clear whole field)")
+            #endif
+            return true
+        }
+
+        let hasClearSubstring = hebrewClearCueTokens.contains(where: { collapsed.contains($0) })
+        #if DEBUG
+        FoodSearchClearDebugLog.log("fieldTriggersClear hasClearSubstring=\(hasClearSubstring)")
+        #endif
+        guard hasClearSubstring else {
+            #if DEBUG
+            FoodSearchClearDebugLog.log("fieldTriggersClear -> false (no clear substring)")
+            #endif
+            return false
+        }
+        let normalized = normalizedSearchInput(nfc)
+        let normEmpty = normalized.isEmpty
+        #if DEBUG
+        FoodSearchClearDebugLog.log(
+            "fieldTriggersClear normalized reflecting=\(String(reflecting: normalized)) scalars=\(FoodSearchClearDebugLog.unicodeScalarsHex(normalized)) isEmpty=\(normEmpty)"
+        )
+        FoodSearchClearDebugLog.log("fieldTriggersClear -> \(normEmpty) (normalized-empty path)")
+        #endif
+        return normEmpty
     }
 
     private static func fieldContainsSubmitCue(_ raw: String) -> Bool {
@@ -361,6 +467,9 @@ final class DailyDiaryViewModel: ObservableObject {
     @discardableResult
     func submitFoodQueryLine(_ raw: String, api: APIClient) async throws -> Bool {
         if Self.fieldTriggersClearCommand(raw) {
+            #if DEBUG
+            FoodSearchClearDebugLog.log("submitFoodQueryLine: clear command tick -> \(foodSearchClearCommandTick + 1)")
+            #endif
             foodSearchClearCommandTick += 1
             return false
         }

@@ -2,11 +2,12 @@ import AVFoundation
 import Foundation
 import Speech
 
-#if DEBUG
-private func foodSearchClearDebugLog(_ message: String) {
-    print("[FoodSearchClear] speech: \(message)")
+/// Debug-only console lines (filter Xcode console: `SpeechSTT`).
+private func debugSpeechSTT(_ message: String) {
+    #if DEBUG
+    print("[SpeechSTT] \(message)")
+    #endif
 }
-#endif
 
 /// Apple on-device/server speech recognition first; on low confidence or failure, sends recorded audio to Whisper (same flow as `personal_assistant_app` `TranscriptionService`).
 @MainActor
@@ -19,6 +20,13 @@ final class FoodSearchSpeechService: NSObject, ObservableObject {
 
     /// Matches `TranscriptionService.confidenceThreshold` in personal_assistant_app.
     private static let confidenceThreshold: Float = 0.5
+
+    /// Whisper API language code (ISO 639-1) when not auto-detecting.
+    private static let whisperLanguageCode = "he"
+
+    private static func normalizedSpeechTextForDisplay(_ s: String) -> String {
+        s.replacingOccurrences(of: ",", with: "").replacingOccurrences(of: ".", with: "")
+    }
 
     @Published private(set) var phase: Phase = .idle
     @Published private(set) var lastErrorMessage: String?
@@ -69,9 +77,6 @@ final class FoodSearchSpeechService: NSObject, ObservableObject {
 
     /// «נקה» / clear command: drop accumulated recognition + WAV; if Whisper is running, cancel the whole session.
     func resetBuffersForClearCommand() {
-        #if DEBUG
-        foodSearchClearDebugLog("resetBuffersForClearCommand phase=\(String(describing: phase))")
-        #endif
         switch phase {
         case .listening:
             resetStreamingRecognitionAfterCommittedLine()
@@ -166,6 +171,7 @@ final class FoodSearchSpeechService: NSObject, ObservableObject {
             try audioEngine.start()
             didEmitFinished = false
             phase = .listening
+            debugSpeechSTT("session started Apple SFSpeechRecognizer locale=\(selectedLocale.identifier)")
         } catch {
             tearDownFullSession()
             finish(.failure(error))
@@ -187,12 +193,14 @@ final class FoodSearchSpeechService: NSObject, ObservableObject {
     private func handleRecognitionResult(result: SFSpeechRecognitionResult?, error: Error?) {
         if didEmitFinished { return }
         if onFinished == nil { return }
+        if phase == .transcribingRemote { return }
 
         if let error {
+            debugSpeechSTT("Apple STT error -> Whisper path error=\(String(describing: error)) localized=\(error.localizedDescription)")
             phase = .transcribingRemote
             stopRecordingCaptureOnly()
             Task {
-                await self.runWhisperUpload(appleFallbackText: nil, underlying: error)
+                await self.runWhisperUpload(appleFallbackText: nil, underlying: error, reason: "apple_recognition_error")
             }
             return
         }
@@ -202,30 +210,49 @@ final class FoodSearchSpeechService: NSObject, ObservableObject {
         let transcription = result.bestTranscription.formattedString
         let isFinal = result.isFinal
         let confidence = averageSegmentConfidence(result.bestTranscription)
+        let trimmed = transcription.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if !isFinal, shouldUsePartialWhisperFallback(confidence: confidence, trimmed: trimmed, transcription: result.bestTranscription) {
+            debugSpeechSTT("Apple STT partial low confidence (\(confidence) < \(Self.confidenceThreshold)) -> Whisper path appleText=\(String(reflecting: trimmed))")
+            phase = .transcribingRemote
+            onPartial?(Self.normalizedSpeechTextForDisplay(trimmed))
+            stopRecordingCaptureOnly()
+            Task {
+                await self.runWhisperUpload(appleFallbackText: trimmed, underlying: nil, reason: "apple_low_confidence_partial")
+            }
+            return
+        }
 
         if !transcription.isEmpty {
-            onPartial?(transcription)
+            if isFinal {
+                debugSpeechSTT("Apple STT final transcript=\(String(reflecting: transcription)) avgSegmentConfidence=\(confidence)")
+            } else {
+                debugSpeechSTT("Apple STT partial transcript=\(String(reflecting: transcription)) avgSegmentConfidence=\(confidence)")
+            }
+            onPartial?(Self.normalizedSpeechTextForDisplay(transcription))
         }
 
         if isFinal {
-            let trimmed = transcription.trimmingCharacters(in: .whitespacesAndNewlines)
             if trimmed.isEmpty {
+                debugSpeechSTT("Apple STT final empty after trim -> Whisper path")
                 phase = .transcribingRemote
                 stopRecordingCaptureOnly()
                 Task {
-                    await self.runWhisperUpload(appleFallbackText: nil, underlying: SpeechServiceError.emptyAppleTranscript)
+                    await self.runWhisperUpload(appleFallbackText: nil, underlying: SpeechServiceError.emptyAppleTranscript, reason: "apple_empty_transcript")
                 }
                 return
             }
 
             if shouldUseWhisperFallback(confidence: confidence) {
+                debugSpeechSTT("Apple STT low confidence (\(confidence) < \(Self.confidenceThreshold)) -> Whisper path appleText=\(String(reflecting: trimmed))")
                 phase = .transcribingRemote
-                onPartial?(trimmed)
+                onPartial?(Self.normalizedSpeechTextForDisplay(trimmed))
                 stopRecordingCaptureOnly()
                 Task {
-                    await self.runWhisperUpload(appleFallbackText: trimmed, underlying: nil)
+                    await self.runWhisperUpload(appleFallbackText: trimmed, underlying: nil, reason: "apple_low_confidence")
                 }
             } else {
+                debugSpeechSTT("result using Apple built-in only text=\(String(reflecting: trimmed)) avgSegmentConfidence=\(confidence)")
                 tearDownFullSession()
                 finish(.success(trimmed))
             }
@@ -236,6 +263,13 @@ final class FoodSearchSpeechService: NSObject, ObservableObject {
         confidence < Self.confidenceThreshold
     }
 
+    /// Partials often report `avgSegmentConfidence == 0` until segments exist; avoid treating that alone as “low confidence” for 1–2 characters.
+    private func shouldUsePartialWhisperFallback(confidence: Float, trimmed: String, transcription: SFTranscription) -> Bool {
+        guard !trimmed.isEmpty, trimmed.count >= 2, shouldUseWhisperFallback(confidence: confidence) else { return false }
+        if !transcription.segments.isEmpty { return true }
+        return trimmed.count >= 3
+    }
+
     private func averageSegmentConfidence(_ transcription: SFTranscription) -> Float {
         let segments = transcription.segments
         guard !segments.isEmpty else { return 0 }
@@ -243,10 +277,12 @@ final class FoodSearchSpeechService: NSObject, ObservableObject {
         return sum / Float(segments.count)
     }
 
-    private func runWhisperUpload(appleFallbackText: String?, underlying: Error?) async {
+    private func runWhisperUpload(appleFallbackText: String?, underlying: Error?, reason: String) async {
         defer {
             tearDownFullSession()
         }
+
+        debugSpeechSTT("Whisper path start reason=\(reason)")
 
         let wavURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("food_search_voice_\(UUID().uuidString).wav")
@@ -258,6 +294,7 @@ final class FoodSearchSpeechService: NSObject, ObservableObject {
             let attrs = try? FileManager.default.attributesOfItem(atPath: wavURL.path)
             let size = (attrs?[.size] as? NSNumber)?.intValue ?? 0
             if size < 512 {
+                debugSpeechSTT("Whisper skipped WAV too small (\(size) bytes); using fallback appleText=\(String(reflecting: appleFallbackText ?? "")) underlying=\(String(describing: underlying))")
                 if let t = appleFallbackText, !t.isEmpty {
                     finish(.success(t))
                     return
@@ -266,11 +303,19 @@ final class FoodSearchSpeechService: NSObject, ObservableObject {
                 return
             }
 
-            let whisperResult = try await whisperClient.transcribeAudioFile(at: wavURL, autoDetectLanguage: true)
+            debugSpeechSTT("Whisper POST audio bytes=\(size)")
+            let whisperResult = try await whisperClient.transcribeAudioFile(
+                at: wavURL,
+                autoDetectLanguage: false,
+                language: Self.whisperLanguageCode
+            )
             try? FileManager.default.removeItem(at: wavURL)
+            debugSpeechSTT("Whisper result text=\(String(reflecting: whisperResult.text))")
             finish(.success(whisperResult.text))
         } catch {
+            debugSpeechSTT("Whisper request failed error=\(String(describing: error)) localized=\(error.localizedDescription); fallback appleText=\(String(reflecting: appleFallbackText ?? ""))")
             if let t = appleFallbackText, !t.isEmpty {
+                debugSpeechSTT("delivering Apple fallback text to caller")
                 finish(.success(t))
             } else {
                 finish(.failure(error))
@@ -324,7 +369,14 @@ final class FoodSearchSpeechService: NSObject, ObservableObject {
             lastErrorMessage = err.localizedDescription
         }
 
-        callback?(result)
+        let delivered: Result<String, Error>
+        switch result {
+        case let .success(s):
+            delivered = .success(Self.normalizedSpeechTextForDisplay(s))
+        case let .failure(e):
+            delivered = .failure(e)
+        }
+        callback?(delivered)
     }
 
     private func preferredSpeechLocale() -> Locale {

@@ -25,19 +25,9 @@ struct DailyDiaryView: View {
         Binding(
             get: { queryLine },
             set: { newValue in
-                #if DEBUG
-                let prevLen = queryLine.count
-                #endif
                 queryLine = newValue
                 viewModel.onFoodQueryChanged(newValue, api: appModel.apiClient)
-                let shouldClear = viewModel.isFoodSearchClearOnlyLine(newValue)
-                #if DEBUG
-                print("[FoodSearchClear] binding set prevLen=\(prevLen) newLen=\(newValue.count) reflecting=\(String(reflecting: newValue)) shouldClear=\(shouldClear)")
-                #endif
-                if shouldClear {
-                    #if DEBUG
-                    print("[FoodSearchClear] binding -> syncClearFoodSearchFieldFromCommand()")
-                    #endif
+                if viewModel.isFoodSearchClearOnlyLine(newValue) {
                     syncClearFoodSearchFieldFromCommand()
                 }
             }
@@ -46,9 +36,6 @@ struct DailyDiaryView: View {
 
     /// Clears the line, search suggestions, dictation buffer, and refocuses — must run on the main thread when «נקה» is recognized (do not rely on `onChange` of a tick alone).
     private func syncClearFoodSearchFieldFromCommand() {
-        #if DEBUG
-        print("[FoodSearchClear] syncClearFoodSearchFieldFromCommand() phase=\(String(describing: foodSpeech.phase))")
-        #endif
         queryLine = ""
         viewModel.onFoodQueryChanged("", api: appModel.apiClient)
         foodSpeech.resetBuffersForClearCommand()

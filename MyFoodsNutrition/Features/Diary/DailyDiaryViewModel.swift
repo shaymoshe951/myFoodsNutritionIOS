@@ -1,18 +1,5 @@
 import Foundation
 
-#if DEBUG
-/// Traces «נקה» clear-command detection in Xcode console (filter: `FoodSearchClear`).
-private enum FoodSearchClearDebugLog {
-    static func unicodeScalarsHex(_ s: String) -> String {
-        s.unicodeScalars.map { String(format: "U+%04X", $0.value) }.joined(separator: " ")
-    }
-
-    static func log(_ message: String) {
-        print("[FoodSearchClear] \(message)")
-    }
-}
-#endif
-
 enum DiaryEntryError: LocalizedError {
     case needsGramAmount
     case pickExactFood
@@ -177,9 +164,6 @@ final class DailyDiaryViewModel: ObservableObject {
     func onFoodQueryChanged(_ text: String, api: APIClient) {
         searchDebounceTask?.cancel()
         if Self.fieldTriggersClearCommand(text) {
-            #if DEBUG
-            FoodSearchClearDebugLog.log("onFoodQueryChanged: clear branch tick -> \(foodSearchClearCommandTick + 1)")
-            #endif
             searchSuggestions = []
             searchPreviewGrams = 100
             foodSearchClearCommandTick += 1
@@ -220,9 +204,6 @@ final class DailyDiaryViewModel: ObservableObject {
         searchDebounceTask?.cancel()
         searchDebounceTask = nil
         if Self.fieldTriggersClearCommand(text) {
-            #if DEBUG
-            FoodSearchClearDebugLog.log("applyFoodQueryNow: clear branch tick -> \(foodSearchClearCommandTick + 1)")
-            #endif
             searchSuggestions = []
             searchPreviewGrams = 100
             foodSearchClearCommandTick += 1
@@ -337,66 +318,20 @@ final class DailyDiaryViewModel: ObservableObject {
 
     /// True when the field contains a clear cue and nothing else remains for search after stripping cues (typed or dictated).
     private static func fieldTriggersClearCommand(_ raw: String) -> Bool {
-        #if DEBUG
-        FoodSearchClearDebugLog.log(
-            "fieldTriggersClear INPUT count=\(raw.count) reflecting=\(String(reflecting: raw)) scalars=\(FoodSearchClearDebugLog.unicodeScalarsHex(raw))"
-        )
-        #endif
         let nfc = raw.precomposedStringWithCanonicalMapping
         let rawTrim = strippedBidiAndDigits(nfc).trimmingCharacters(in: .whitespacesAndNewlines)
-        #if DEBUG
-        FoodSearchClearDebugLog.log(
-            "fieldTriggersClear after strip+trim count=\(rawTrim.count) reflecting=\(String(reflecting: rawTrim)) scalars=\(FoodSearchClearDebugLog.unicodeScalarsHex(rawTrim))"
-        )
-        #endif
-        guard !rawTrim.isEmpty else {
-            #if DEBUG
-            FoodSearchClearDebugLog.log("fieldTriggersClear -> false (empty after trim)")
-            #endif
-            return false
-        }
+        guard !rawTrim.isEmpty else { return false }
 
         let collapsed = collapseWhitespaceForCueMatch(rawTrim)
-        #if DEBUG
-        FoodSearchClearDebugLog.log(
-            "fieldTriggersClear collapsed reflecting=\(String(reflecting: collapsed)) scalars=\(FoodSearchClearDebugLog.unicodeScalarsHex(collapsed))"
-        )
-        #endif
         for tok in hebrewClearCueTokensLongestFirst {
-            if collapsed == tok {
-                #if DEBUG
-                FoodSearchClearDebugLog.log("fieldTriggersClear -> true (exact match token=\(String(reflecting: tok)))")
-                #endif
-                return true
-            }
+            if collapsed == tok { return true }
         }
 
-        if hasTrailingWholeWordClearCommand(collapsed) {
-            #if DEBUG
-            FoodSearchClearDebugLog.log("fieldTriggersClear -> true (trailing clear word, clear whole field)")
-            #endif
-            return true
-        }
+        if hasTrailingWholeWordClearCommand(collapsed) { return true }
 
         let hasClearSubstring = hebrewClearCueTokens.contains(where: { collapsed.contains($0) })
-        #if DEBUG
-        FoodSearchClearDebugLog.log("fieldTriggersClear hasClearSubstring=\(hasClearSubstring)")
-        #endif
-        guard hasClearSubstring else {
-            #if DEBUG
-            FoodSearchClearDebugLog.log("fieldTriggersClear -> false (no clear substring)")
-            #endif
-            return false
-        }
-        let normalized = normalizedSearchInput(nfc)
-        let normEmpty = normalized.isEmpty
-        #if DEBUG
-        FoodSearchClearDebugLog.log(
-            "fieldTriggersClear normalized reflecting=\(String(reflecting: normalized)) scalars=\(FoodSearchClearDebugLog.unicodeScalarsHex(normalized)) isEmpty=\(normEmpty)"
-        )
-        FoodSearchClearDebugLog.log("fieldTriggersClear -> \(normEmpty) (normalized-empty path)")
-        #endif
-        return normEmpty
+        guard hasClearSubstring else { return false }
+        return normalizedSearchInput(nfc).isEmpty
     }
 
     private static func fieldContainsSubmitCue(_ raw: String) -> Bool {
@@ -467,9 +402,6 @@ final class DailyDiaryViewModel: ObservableObject {
     @discardableResult
     func submitFoodQueryLine(_ raw: String, api: APIClient) async throws -> Bool {
         if Self.fieldTriggersClearCommand(raw) {
-            #if DEBUG
-            FoodSearchClearDebugLog.log("submitFoodQueryLine: clear command tick -> \(foodSearchClearCommandTick + 1)")
-            #endif
             foodSearchClearCommandTick += 1
             return false
         }

@@ -15,11 +15,26 @@ struct WhisperTranscriptionClient {
 
     func transcribeAudioFile(
         at fileURL: URL,
-        autoDetectLanguage: Bool = true,
+        autoDetectLanguage: Bool = false,
+        language: String? = "he",
         baseURL: String = SpeechFallbackConfig.whisperBaseURL()
     ) async throws -> Result {
-        guard let endpoint = URL(string: baseURL + "/api/transcribe-whisper-audio") else {
-            throw WhisperError.invalidURL
+        let path = baseURL + "/api/transcribe-whisper-audio"
+        var endpoint: URL
+        if !autoDetectLanguage, let language, !language.isEmpty {
+            var components = URLComponents(string: path)
+            var items = components?.queryItems ?? []
+            items.append(URLQueryItem(name: "language", value: language))
+            components?.queryItems = items
+            guard let u = components?.url else {
+                throw WhisperError.invalidURL
+            }
+            endpoint = u
+        } else {
+            guard let u = URL(string: path) else {
+                throw WhisperError.invalidURL
+            }
+            endpoint = u
         }
 
         let boundary = "Boundary-\(UUID().uuidString)"
@@ -31,9 +46,18 @@ struct WhisperTranscriptionClient {
         let filename = fileURL.lastPathComponent.isEmpty ? "audio.wav" : fileURL.lastPathComponent
 
         var body = Data()
-        body.append("--\(boundary)\r\n".data(using: .utf8)!)
-        body.append("Content-Disposition: form-data; name=\"autoDetectLanguage\"\r\n\r\n".data(using: .utf8)!)
-        body.append("\(autoDetectLanguage)\r\n".data(using: .utf8)!)
+        // When fixed language is used, omit `autoDetectLanguage` entirely. Sending the string "false" is still
+        // truthy in JavaScript `if (req.body.autoDetectLanguage)`, which can leave auto-detect on and ignore `language`.
+        if autoDetectLanguage {
+            body.append("--\(boundary)\r\n".data(using: .utf8)!)
+            body.append("Content-Disposition: form-data; name=\"autoDetectLanguage\"\r\n\r\n".data(using: .utf8)!)
+            body.append("1\r\n".data(using: .utf8)!)
+        }
+        if !autoDetectLanguage, let language, !language.isEmpty {
+            body.append("--\(boundary)\r\n".data(using: .utf8)!)
+            body.append("Content-Disposition: form-data; name=\"language\"\r\n\r\n".data(using: .utf8)!)
+            body.append("\(language)\r\n".data(using: .utf8)!)
+        }
 
         body.append("--\(boundary)\r\n".data(using: .utf8)!)
         body.append("Content-Disposition: form-data; name=\"audio\"; filename=\"\(filename)\"\r\n".data(using: .utf8)!)

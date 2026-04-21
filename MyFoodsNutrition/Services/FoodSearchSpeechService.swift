@@ -42,14 +42,13 @@ final class FoodSearchSpeechService: NSObject, ObservableObject {
     private var recognitionSessionId = UUID()
 
     private var onPartial: ((String) -> Void)?
+    /// Invoked for each completed phrase while the mic stays on (Apple `isFinal`, or Whisper result). Session ends only on `endSession`, permission failure, or `cancelSession`.
     private var onFinished: ((Result<String, Error>) -> Void)?
-    private var didEmitFinished = false
 
     /// Stops recognition without delivering a result (user cancelled).
     func cancelSession() {
         onPartial = nil
         onFinished = nil
-        didEmitFinished = false
         tearDownFullSession()
         phase = .idle
     }
@@ -89,12 +88,11 @@ final class FoodSearchSpeechService: NSObject, ObservableObject {
 
     /// - Parameters:
     ///   - onPartial: Streaming text from Apple STT.
-    ///   - onFinished: Final text to place in the search field, or error.
+    ///   - onFinished: Called for **each** finalized utterance (phrase) while dictation stays active; not only once at the end.
     func startListening(
         onPartial: @escaping (String) -> Void,
         onFinished: @escaping (Result<String, Error>) -> Void
     ) {
-        didEmitFinished = false
         lastErrorMessage = nil
         self.onPartial = onPartial
         self.onFinished = onFinished
@@ -105,13 +103,18 @@ final class FoodSearchSpeechService: NSObject, ObservableObject {
     }
 
     private func beginSession() async {
+        guard onFinished != nil else {
+            tearDownFullSession()
+            return
+        }
+
         let speechAuth: SFSpeechRecognizerAuthorizationStatus = await withCheckedContinuation { cont in
             SFSpeechRecognizer.requestAuthorization { status in
                 cont.resume(returning: status)
             }
         }
         guard speechAuth == .authorized else {
-            finish(.failure(SpeechServiceError.speechPermissionDenied))
+            endSession(.failure(SpeechServiceError.speechPermissionDenied))
             return
         }
 
@@ -131,14 +134,14 @@ final class FoodSearchSpeechService: NSObject, ObservableObject {
             }
         }
         guard micGranted else {
-            finish(.failure(SpeechServiceError.microphonePermissionDenied))
+            endSession(.failure(SpeechServiceError.microphonePermissionDenied))
             return
         }
 
         selectedLocale = preferredSpeechLocale()
 
         guard let recognizer = SFSpeechRecognizer(locale: selectedLocale), recognizer.isAvailable else {
-            finish(.failure(SpeechServiceError.recognizerUnavailable))
+            endSession(.failure(SpeechServiceError.recognizerUnavailable))
             return
         }
         speechRecognizer = recognizer
@@ -169,12 +172,11 @@ final class FoodSearchSpeechService: NSObject, ObservableObject {
 
             audioEngine.prepare()
             try audioEngine.start()
-            didEmitFinished = false
             phase = .listening
             debugSpeechSTT("session started Apple SFSpeechRecognizer locale=\(selectedLocale.identifier)")
         } catch {
             tearDownFullSession()
-            finish(.failure(error))
+            endSession(.failure(error))
         }
     }
 
@@ -191,7 +193,6 @@ final class FoodSearchSpeechService: NSObject, ObservableObject {
     }
 
     private func handleRecognitionResult(result: SFSpeechRecognitionResult?, error: Error?) {
-        if didEmitFinished { return }
         if onFinished == nil { return }
         if phase == .transcribingRemote { return }
 
@@ -199,8 +200,9 @@ final class FoodSearchSpeechService: NSObject, ObservableObject {
             debugSpeechSTT("Apple STT error -> Whisper path error=\(String(describing: error)) localized=\(error.localizedDescription)")
             phase = .transcribingRemote
             stopRecordingCaptureOnly()
-            Task {
-                await self.runWhisperUpload(appleFallbackText: nil, underlying: error, reason: "apple_recognition_error")
+            Task { @MainActor in
+                let whisperResult = await self.runWhisperUpload(appleFallbackText: nil, underlying: error, reason: "apple_recognition_error")
+                self.deliverUtteranceAndResumeAfterRemote(whisperResult)
             }
             return
         }
@@ -217,8 +219,9 @@ final class FoodSearchSpeechService: NSObject, ObservableObject {
             phase = .transcribingRemote
             onPartial?(Self.normalizedSpeechTextForDisplay(trimmed))
             stopRecordingCaptureOnly()
-            Task {
-                await self.runWhisperUpload(appleFallbackText: trimmed, underlying: nil, reason: "apple_low_confidence_partial")
+            Task { @MainActor in
+                let whisperResult = await self.runWhisperUpload(appleFallbackText: trimmed, underlying: nil, reason: "apple_low_confidence_partial")
+                self.deliverUtteranceAndResumeAfterRemote(whisperResult)
             }
             return
         }
@@ -237,8 +240,9 @@ final class FoodSearchSpeechService: NSObject, ObservableObject {
                 debugSpeechSTT("Apple STT final empty after trim -> Whisper path")
                 phase = .transcribingRemote
                 stopRecordingCaptureOnly()
-                Task {
-                    await self.runWhisperUpload(appleFallbackText: nil, underlying: SpeechServiceError.emptyAppleTranscript, reason: "apple_empty_transcript")
+                Task { @MainActor in
+                    let whisperResult = await self.runWhisperUpload(appleFallbackText: nil, underlying: SpeechServiceError.emptyAppleTranscript, reason: "apple_empty_transcript")
+                    self.deliverUtteranceAndResumeAfterRemote(whisperResult)
                 }
                 return
             }
@@ -248,14 +252,35 @@ final class FoodSearchSpeechService: NSObject, ObservableObject {
                 phase = .transcribingRemote
                 onPartial?(Self.normalizedSpeechTextForDisplay(trimmed))
                 stopRecordingCaptureOnly()
-                Task {
-                    await self.runWhisperUpload(appleFallbackText: trimmed, underlying: nil, reason: "apple_low_confidence")
+                Task { @MainActor in
+                    let whisperResult = await self.runWhisperUpload(appleFallbackText: trimmed, underlying: nil, reason: "apple_low_confidence")
+                    self.deliverUtteranceAndResumeAfterRemote(whisperResult)
                 }
             } else {
                 debugSpeechSTT("result using Apple built-in only text=\(String(reflecting: trimmed)) avgSegmentConfidence=\(confidence)")
-                tearDownFullSession()
-                finish(.success(trimmed))
+                deliverUtterance(.success(trimmed))
+                resetStreamingRecognitionAfterCommittedLine()
             }
+        }
+    }
+
+    private func deliverUtterance(_ result: Result<String, Error>) {
+        let delivered: Result<String, Error>
+        switch result {
+        case let .success(s):
+            delivered = .success(Self.normalizedSpeechTextForDisplay(s))
+        case let .failure(e):
+            delivered = .failure(e)
+        }
+        onFinished?(delivered)
+    }
+
+    /// After Whisper (or any path that called `stopRecordingCaptureOnly` + `tearDownFullSession`), deliver text and start a new listening session if the user is still in voice mode.
+    private func deliverUtteranceAndResumeAfterRemote(_ result: Result<String, Error>) {
+        deliverUtterance(result)
+        guard onFinished != nil else { return }
+        Task { @MainActor in
+            await self.beginSession()
         }
     }
 
@@ -277,7 +302,7 @@ final class FoodSearchSpeechService: NSObject, ObservableObject {
         return sum / Float(segments.count)
     }
 
-    private func runWhisperUpload(appleFallbackText: String?, underlying: Error?, reason: String) async {
+    private func runWhisperUpload(appleFallbackText: String?, underlying: Error?, reason: String) async -> Result<String, Error> {
         defer {
             tearDownFullSession()
         }
@@ -296,11 +321,9 @@ final class FoodSearchSpeechService: NSObject, ObservableObject {
             if size < 512 {
                 debugSpeechSTT("Whisper skipped WAV too small (\(size) bytes); using fallback appleText=\(String(reflecting: appleFallbackText ?? "")) underlying=\(String(describing: underlying))")
                 if let t = appleFallbackText, !t.isEmpty {
-                    finish(.success(t))
-                    return
+                    return .success(t)
                 }
-                finish(.failure(underlying ?? SpeechServiceError.emptyAppleTranscript))
-                return
+                return .failure(underlying ?? SpeechServiceError.emptyAppleTranscript)
             }
 
             debugSpeechSTT("Whisper POST audio bytes=\(size)")
@@ -311,15 +334,14 @@ final class FoodSearchSpeechService: NSObject, ObservableObject {
             )
             try? FileManager.default.removeItem(at: wavURL)
             debugSpeechSTT("Whisper result text=\(String(reflecting: whisperResult.text))")
-            finish(.success(whisperResult.text))
+            return .success(whisperResult.text)
         } catch {
             debugSpeechSTT("Whisper request failed error=\(String(describing: error)) localized=\(error.localizedDescription); fallback appleText=\(String(reflecting: appleFallbackText ?? ""))")
             if let t = appleFallbackText, !t.isEmpty {
                 debugSpeechSTT("delivering Apple fallback text to caller")
-                finish(.success(t))
-            } else {
-                finish(.failure(error))
+                return .success(t)
             }
+            return .failure(error)
         }
     }
 
@@ -357,13 +379,14 @@ final class FoodSearchSpeechService: NSObject, ObservableObject {
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
 
-    private func finish(_ result: Result<String, Error>) {
-        guard !didEmitFinished else { return }
-        didEmitFinished = true
+    /// Ends voice mode: stops the mic and clears callbacks (permission errors, unrecoverable start failure, or future explicit “stop” APIs).
+    private func endSession(_ result: Result<String, Error>) {
+        guard onFinished != nil else { return }
         phase = .idle
         let callback = onFinished
         onPartial = nil
         onFinished = nil
+        tearDownFullSession()
 
         if case let .failure(err) = result {
             lastErrorMessage = err.localizedDescription

@@ -20,6 +20,7 @@ final class FoodSearchSpeechService: NSObject, ObservableObject {
 
     /// Matches `TranscriptionService.confidenceThreshold` in personal_assistant_app.
     private static let confidenceThreshold: Float = 0.5
+    private static let minimumWhisperAudioSeconds: Double = 1.2
 
     /// Whisper API language code (ISO 639-1) when not auto-detecting.
     private static let whisperLanguageCode = "he"
@@ -44,9 +45,16 @@ final class FoodSearchSpeechService: NSObject, ObservableObject {
     private var onPartial: ((String) -> Void)?
     /// Invoked for each completed phrase while the mic stays on (Apple `isFinal`, or Whisper result). Session ends only on `endSession`, permission failure, or `cancelSession`.
     private var onFinished: ((Result<String, Error>) -> Void)?
+    private var rollingWhisperDebounceTask: Task<Void, Never>?
+    private var rollingWhisperRequestSequence = 0
+    private var rollingWhisperLastDeliveredSequence = 0
 
     /// Stops recognition without delivering a result (user cancelled).
     func cancelSession() {
+        rollingWhisperDebounceTask?.cancel()
+        rollingWhisperDebounceTask = nil
+        rollingWhisperRequestSequence = 0
+        rollingWhisperLastDeliveredSequence = 0
         onPartial = nil
         onFinished = nil
         tearDownFullSession()
@@ -56,6 +64,10 @@ final class FoodSearchSpeechService: NSObject, ObservableObject {
     /// After committing a food line (Enter / add) while the mic stays on: end the current recognition request and start a new one so the next partials don’t repeat the previous utterance.
     func resetStreamingRecognitionAfterCommittedLine() {
         guard phase == .listening, tapInstalled, let rec = speechRecognizer else { return }
+        rollingWhisperDebounceTask?.cancel()
+        rollingWhisperDebounceTask = nil
+        rollingWhisperRequestSequence = 0
+        rollingWhisperLastDeliveredSequence = 0
 
         recognitionTask?.cancel()
         recognitionTask = nil
@@ -197,13 +209,9 @@ final class FoodSearchSpeechService: NSObject, ObservableObject {
         if phase == .transcribingRemote { return }
 
         if let error {
-            debugSpeechSTT("Apple STT error -> Whisper path error=\(String(describing: error)) localized=\(error.localizedDescription)")
-            phase = .transcribingRemote
-            stopRecordingCaptureOnly()
-            Task { @MainActor in
-                let whisperResult = await self.runWhisperUpload(appleFallbackText: nil, underlying: error, reason: "apple_recognition_error")
-                self.deliverUtteranceAndResumeAfterRemote(whisperResult)
-            }
+            debugSpeechSTT("Apple STT error (Apple-only mode) error=\(String(describing: error)) localized=\(error.localizedDescription)")
+            deliverUtterance(.failure(error))
+            resetStreamingRecognitionAfterCommittedLine()
             return
         }
 
@@ -215,14 +223,9 @@ final class FoodSearchSpeechService: NSObject, ObservableObject {
         let trimmed = transcription.trimmingCharacters(in: .whitespacesAndNewlines)
 
         if !isFinal, shouldUsePartialWhisperFallback(confidence: confidence, trimmed: trimmed, transcription: result.bestTranscription) {
-            debugSpeechSTT("Apple STT partial low confidence (\(confidence) < \(Self.confidenceThreshold)) -> Whisper path appleText=\(String(reflecting: trimmed))")
-            phase = .transcribingRemote
+            debugSpeechSTT("Apple STT partial low confidence (\(confidence) < \(Self.confidenceThreshold)) -> rolling Whisper path appleText=\(String(reflecting: trimmed))")
             onPartial?(Self.normalizedSpeechTextForDisplay(trimmed))
-            stopRecordingCaptureOnly()
-            Task { @MainActor in
-                let whisperResult = await self.runWhisperUpload(appleFallbackText: trimmed, underlying: nil, reason: "apple_low_confidence_partial")
-                self.deliverUtteranceAndResumeAfterRemote(whisperResult)
-            }
+            scheduleRollingWhisperUpload(appleFallbackText: trimmed)
             return
         }
 
@@ -237,25 +240,15 @@ final class FoodSearchSpeechService: NSObject, ObservableObject {
 
         if isFinal {
             if trimmed.isEmpty {
-                debugSpeechSTT("Apple STT final empty after trim -> Whisper path")
-                phase = .transcribingRemote
-                stopRecordingCaptureOnly()
-                Task { @MainActor in
-                    let whisperResult = await self.runWhisperUpload(appleFallbackText: nil, underlying: SpeechServiceError.emptyAppleTranscript, reason: "apple_empty_transcript")
-                    self.deliverUtteranceAndResumeAfterRemote(whisperResult)
-                }
+                debugSpeechSTT("Apple STT final empty after trim (Apple-only mode); resetting recognition")
+                resetStreamingRecognitionAfterCommittedLine()
                 return
             }
 
             if shouldUseWhisperFallback(confidence: confidence) {
-                debugSpeechSTT("Apple STT low confidence (\(confidence) < \(Self.confidenceThreshold)) -> Whisper path appleText=\(String(reflecting: trimmed))")
-                phase = .transcribingRemote
-                onPartial?(Self.normalizedSpeechTextForDisplay(trimmed))
-                stopRecordingCaptureOnly()
-                Task { @MainActor in
-                    let whisperResult = await self.runWhisperUpload(appleFallbackText: trimmed, underlying: nil, reason: "apple_low_confidence")
-                    self.deliverUtteranceAndResumeAfterRemote(whisperResult)
-                }
+                debugSpeechSTT("Apple STT low confidence (\(confidence) < \(Self.confidenceThreshold)) but Apple-only mode keeps Apple text")
+                deliverUtterance(.success(trimmed))
+                resetStreamingRecognitionAfterCommittedLine()
             } else {
                 debugSpeechSTT("result using Apple built-in only text=\(String(reflecting: trimmed)) avgSegmentConfidence=\(confidence)")
                 deliverUtterance(.success(trimmed))
@@ -268,11 +261,85 @@ final class FoodSearchSpeechService: NSObject, ObservableObject {
         let delivered: Result<String, Error>
         switch result {
         case let .success(s):
-            delivered = .success(Self.normalizedSpeechTextForDisplay(s))
+            let normalized = Self.normalizedSpeechTextForDisplay(s)
+            if normalized.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return }
+            delivered = .success(normalized)
         case let .failure(e):
             delivered = .failure(e)
         }
         onFinished?(delivered)
+    }
+
+    private func scheduleRollingWhisperUpload(appleFallbackText: String?) {
+        rollingWhisperDebounceTask?.cancel()
+        rollingWhisperDebounceTask = nil
+        rollingWhisperRequestSequence += 1
+        let seq = rollingWhisperRequestSequence
+        rollingWhisperDebounceTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 350_000_000)
+            guard !Task.isCancelled else { return }
+            await self.runRollingWhisperUpload(sequence: seq, appleFallbackText: appleFallbackText)
+        }
+    }
+
+    private func runRollingWhisperUpload(sequence: Int, appleFallbackText: String?) async {
+        guard onFinished != nil, phase == .listening else { return }
+        let wavURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("food_search_voice_rolling_\(UUID().uuidString).wav")
+
+        do {
+            try wavAccumulator?.writeSnapshot(to: wavURL)
+            let attrs = try? FileManager.default.attributesOfItem(atPath: wavURL.path)
+            let size = (attrs?[.size] as? NSNumber)?.intValue ?? 0
+            guard size >= 512 else { return }
+            if let seconds = wavDurationSeconds(at: wavURL), seconds < Self.minimumWhisperAudioSeconds { return }
+
+            debugSpeechSTT("Rolling Whisper POST seq=\(sequence) audio bytes=\(size)")
+            let whisperResult = try await whisperClient.transcribeAudioFile(
+                at: wavURL,
+                autoDetectLanguage: false,
+                language: Self.whisperLanguageCode
+            )
+            try? FileManager.default.removeItem(at: wavURL)
+
+            if let lang = whisperResult.language?.lowercased(), !lang.hasPrefix("he") {
+                debugSpeechSTT("Rolling Whisper non-Hebrew lang=\(lang); suppressing")
+                return
+            }
+            if !shouldAcceptRollingResult(whisperText: whisperResult.text, appleFallbackText: appleFallbackText) {
+                debugSpeechSTT("Rolling Whisper suppressed low-quality replacement text=\(String(reflecting: whisperResult.text)) fallback=\(String(reflecting: appleFallbackText ?? ""))")
+                return
+            }
+            guard sequence >= rollingWhisperLastDeliveredSequence else { return }
+            rollingWhisperLastDeliveredSequence = sequence
+            deliverUtterance(.success(whisperResult.text))
+        } catch {
+            debugSpeechSTT("Rolling Whisper failed seq=\(sequence) error=\(error.localizedDescription); fallback=\(String(reflecting: appleFallbackText ?? ""))")
+        }
+    }
+
+    private func shouldAcceptRollingResult(whisperText: String, appleFallbackText: String?) -> Bool {
+        let candidate = whisperText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !candidate.isEmpty else { return false }
+        guard let fallback = appleFallbackText?.trimmingCharacters(in: .whitespacesAndNewlines), !fallback.isEmpty else { return true }
+
+        // If Apple partial already contains Hebrew and Whisper regression is digit-only (e.g. "1130"),
+        // keep the Apple partial shown in UI.
+        if containsHebrew(fallback), isMostlyDigits(candidate), !containsHebrew(candidate) {
+            return false
+        }
+        return true
+    }
+
+    private func containsHebrew(_ s: String) -> Bool {
+        s.unicodeScalars.contains { $0.value >= 0x0590 && $0.value <= 0x05FF }
+    }
+
+    private func isMostlyDigits(_ s: String) -> Bool {
+        let cleaned = s.replacingOccurrences(of: " ", with: "")
+        guard !cleaned.isEmpty else { return false }
+        let digitCount = cleaned.unicodeScalars.filter { CharacterSet.decimalDigits.contains($0) }.count
+        return Double(digitCount) / Double(cleaned.count) >= 0.7
     }
 
     /// After Whisper (or any path that called `stopRecordingCaptureOnly` + `tearDownFullSession`), deliver text and start a new listening session if the user is still in voice mode.
@@ -285,14 +352,16 @@ final class FoodSearchSpeechService: NSObject, ObservableObject {
     }
 
     private func shouldUseWhisperFallback(confidence: Float) -> Bool {
-        confidence < Self.confidenceThreshold
+        _ = confidence
+        return false
     }
 
     /// Partials often report `avgSegmentConfidence == 0` until segments exist; avoid treating that alone as “low confidence” for 1–2 characters.
     private func shouldUsePartialWhisperFallback(confidence: Float, trimmed: String, transcription: SFTranscription) -> Bool {
-        guard !trimmed.isEmpty, trimmed.count >= 2, shouldUseWhisperFallback(confidence: confidence) else { return false }
-        if !transcription.segments.isEmpty { return true }
-        return trimmed.count >= 3
+        _ = confidence
+        _ = trimmed
+        _ = transcription
+        return false
     }
 
     private func averageSegmentConfidence(_ transcription: SFTranscription) -> Float {
@@ -325,6 +394,10 @@ final class FoodSearchSpeechService: NSObject, ObservableObject {
                 }
                 return .failure(underlying ?? SpeechServiceError.emptyAppleTranscript)
             }
+            if let seconds = wavDurationSeconds(at: wavURL), seconds < Self.minimumWhisperAudioSeconds {
+                debugSpeechSTT("Whisper skipped WAV too short (\(String(format: "%.2f", seconds))s < \(Self.minimumWhisperAudioSeconds)s)")
+                return .success("")
+            }
 
             debugSpeechSTT("Whisper POST audio bytes=\(size)")
             let whisperResult = try await whisperClient.transcribeAudioFile(
@@ -334,6 +407,10 @@ final class FoodSearchSpeechService: NSObject, ObservableObject {
             )
             try? FileManager.default.removeItem(at: wavURL)
             debugSpeechSTT("Whisper result text=\(String(reflecting: whisperResult.text))")
+            if let lang = whisperResult.language?.lowercased(), !lang.hasPrefix("he") {
+                debugSpeechSTT("Whisper result language is non-Hebrew (\(lang)); suppressing output")
+                return .success("")
+            }
             return .success(whisperResult.text)
         } catch {
             debugSpeechSTT("Whisper request failed error=\(String(describing: error)) localized=\(error.localizedDescription); fallback appleText=\(String(reflecting: appleFallbackText ?? ""))")
@@ -343,6 +420,30 @@ final class FoodSearchSpeechService: NSObject, ObservableObject {
             }
             return .failure(error)
         }
+    }
+
+    private func wavDurationSeconds(at url: URL) -> Double? {
+        guard let data = try? Data(contentsOf: url), data.count >= 44 else { return nil }
+
+        // WAV header: byteRate at offset 28 (UInt32 LE), data size at offset 40 (UInt32 LE).
+        let byteRate = data.withUnsafeBytes { raw -> UInt32 in
+            let base = raw.bindMemory(to: UInt8.self).baseAddress!
+            let b0 = UInt32(base[28])
+            let b1 = UInt32(base[29]) << 8
+            let b2 = UInt32(base[30]) << 16
+            let b3 = UInt32(base[31]) << 24
+            return b0 | b1 | b2 | b3
+        }
+        let dataSize = data.withUnsafeBytes { raw -> UInt32 in
+            let base = raw.bindMemory(to: UInt8.self).baseAddress!
+            let b0 = UInt32(base[40])
+            let b1 = UInt32(base[41]) << 8
+            let b2 = UInt32(base[42]) << 16
+            let b3 = UInt32(base[43]) << 24
+            return b0 | b1 | b2 | b3
+        }
+        guard byteRate > 0 else { return nil }
+        return Double(dataSize) / Double(byteRate)
     }
 
     /// Stops mic tap and engine; keeps `wavAccumulator` for Whisper upload.
@@ -474,6 +575,10 @@ private final class WavAccumulator {
     }
 
     func finalizeWriting(to url: URL) throws {
+        try WavFileWriter.writePCM16Mono(samples: monoInt16, sampleRate: sampleRate, to: url)
+    }
+
+    func writeSnapshot(to url: URL) throws {
         try WavFileWriter.writePCM16Mono(samples: monoInt16, sampleRate: sampleRate, to: url)
     }
 }

@@ -264,7 +264,7 @@ final class DailyDiaryViewModel: ObservableObject {
     private static let hebrewSubmitCueTokens = ["הוסף", "אוסף"]
     /// Voice/command phrases for clearing the search line; stripped like submit cues when mixed with a food query.
     /// **Order of removal is longest-first** so e.g. «תנקה» is not destroyed by removing the substring «נקה» first (which would leave stray «ת»).
-    private static let hebrewClearCueTokens = ["נקה", "תנקה", "נכה", "לנקות"]
+    private static let hebrewClearCueTokens = ["נקה", "תנקה", "נכה", "לנקות","נקי"]
 
     private static var hebrewClearCueTokensLongestFirst: [String] {
         hebrewClearCueTokens.sorted { $0.count > $1.count }

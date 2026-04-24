@@ -206,10 +206,6 @@ struct DailyDiaryView: View {
                         }
                     }
 
-                    Button("הוסף (כמו Enter באתר)") {
-                        Task { await submitFoodLine() }
-                    }
-                    .disabled(queryLine.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 } header: {
                     Text("חיפוש והוספה")
                 } footer: {
@@ -471,6 +467,7 @@ struct DailyDiaryView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
         } else {
             let order = DailyNutritionSummaryDTO.displayOrder
+            let macroKeys = ["protein", "carbohydrate", "total_lipid_fat"]
             if let cal = s.totals["energy"] {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("\(Self.formatNutInt(cal)) קלוריות")
@@ -483,7 +480,36 @@ struct DailyDiaryView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            ForEach(Array(order.filter { $0 != "energy" }), id: \.self) { key in
+
+            let existingMacroKeys = macroKeys.filter { s.totals[$0] != nil }
+            if !existingMacroKeys.isEmpty {
+                HStack(alignment: .top, spacing: 8) {
+                    ForEach(existingMacroKeys, id: \.self) { key in
+                        VStack(spacing: 2) {
+                            Text(s.labels_he?[key] ?? key)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            if let p = s.dri_percent_by_key?[key] {
+                                Text("\(p)%")
+                                    .font(.subheadline.weight(.semibold))
+                            } else {
+                                Text("לא ידוע")
+                                    .font(.subheadline.weight(.semibold))
+                            }
+                            if let v = s.totals[key] {
+                                Text(Self.formatNutValue(v, key: key))
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.top, 4)
+            }
+
+            ForEach(Array(order.filter { $0 != "energy" && !macroKeys.contains($0) }), id: \.self) { key in
                 if let v = s.totals[key] {
                     HStack(alignment: .firstTextBaseline) {
                         Text(s.labels_he?[key] ?? key)

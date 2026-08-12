@@ -31,6 +31,10 @@
 		BF0023 /* SpeechFallbackConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = FR0023 /* SpeechFallbackConfig.swift */; };
 		BF0024 /* WhisperTranscriptionClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = FR0024 /* WhisperTranscriptionClient.swift */; };
 		BF0025 /* FoodSearchSpeechService.swift in Sources */ = {isa = PBXBuildFile; fileRef = FR0025 /* FoodSearchSpeechService.swift */; };
+		BF0026 /* ImageNutritionSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = FR0026 /* ImageNutritionSettings.swift */; };
+		BF0027 /* FoodImageNutritionDTO.swift in Sources */ = {isa = PBXBuildFile; fileRef = FR0027 /* FoodImageNutritionDTO.swift */; };
+		BF0028 /* FoodImageNutritionClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = FR0028 /* FoodImageNutritionClient.swift */; };
+		BF0029 /* FoodImageAddSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = FR0029 /* FoodImageAddSheet.swift */; };
 		BF0017 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = PKG001 /* GRDB */; };
 /* End PBXBuildFile section */
 
@@ -59,6 +63,10 @@
 		FR0023 /* SpeechFallbackConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechFallbackConfig.swift; sourceTree = "<group>"; };
 		FR0024 /* WhisperTranscriptionClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhisperTranscriptionClient.swift; sourceTree = "<group>"; };
 		FR0025 /* FoodSearchSpeechService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoodSearchSpeechService.swift; sourceTree = "<group>"; };
+		FR0026 /* ImageNutritionSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageNutritionSettings.swift; sourceTree = "<group>"; };
+		FR0027 /* FoodImageNutritionDTO.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoodImageNutritionDTO.swift; sourceTree = "<group>"; };
+		FR0028 /* FoodImageNutritionClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoodImageNutritionClient.swift; sourceTree = "<group>"; };
+		FR0029 /* FoodImageAddSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoodImageAddSheet.swift; sourceTree = "<group>"; };
 		PR0001 /* MyFoodsNutrition.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MyFoodsNutrition.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -115,6 +123,7 @@
 				FR0019 /* DailyNutritionSummaryDTO.swift */,
 				FR0020 /* FoodCatalogDTO.swift */,
 				FR0022 /* NutritionSnapshotDTO.swift */,
+				FR0027 /* FoodImageNutritionDTO.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -138,6 +147,8 @@
 				FR0010 /* APIClient.swift */,
 				FR0023 /* SpeechFallbackConfig.swift */,
 				FR0024 /* WhisperTranscriptionClient.swift */,
+				FR0026 /* ImageNutritionSettings.swift */,
+				FR0028 /* FoodImageNutritionClient.swift */,
 			);
 			path = Networking;
 			sourceTree = "<group>";
@@ -181,6 +192,7 @@
 			children = (
 				FR0013 /* DailyDiaryView.swift */,
 				FR0014 /* DailyDiaryViewModel.swift */,
+				FR0029 /* FoodImageAddSheet.swift */,
 			);
 			path = Diary;
 			sourceTree = "<group>";
@@ -292,6 +304,10 @@
 				BF0023 /* SpeechFallbackConfig.swift in Sources */,
 				BF0024 /* WhisperTranscriptionClient.swift in Sources */,
 				BF0025 /* FoodSearchSpeechService.swift in Sources */,
+				BF0026 /* ImageNutritionSettings.swift in Sources */,
+				BF0027 /* FoodImageNutritionDTO.swift in Sources */,
+				BF0028 /* FoodImageNutritionClient.swift in Sources */,
+				BF0029 /* FoodImageAddSheet.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -358,6 +374,8 @@
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "האפליקציה צריכה גישה למיקרופון כדי להמיר דיבור לטקסט בחיפוש מזון.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "האפליקציה צריכה זיהוי דיבור כדי להזין את חיפוש המזון בקול.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "האפליקציה צריכה גישה למצלמה כדי לצלם מזון ולנתח ערכים תזונתיים.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "האפליקציה צריכה גישה לתמונות כדי לבחור תמונת מזון לניתוח תזונתי.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -389,6 +407,8 @@
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "האפליקציה צריכה גישה למיקרופון כדי להמיר דיבור לטקסט בחיפוש מזון.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "האפליקציה צריכה זיהוי דיבור כדי להזין את חיפוש המזון בקול.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "האפליקציה צריכה גישה למצלמה כדי לצלם מזון ולנתח ערכים תזונתיים.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "האפליקציה צריכה גישה לתמונות כדי לבחור תמונת מזון לניתוח תזונתי.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",

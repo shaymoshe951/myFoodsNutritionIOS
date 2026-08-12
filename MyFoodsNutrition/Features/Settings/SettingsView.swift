@@ -4,6 +4,8 @@ struct SettingsView: View {
     @EnvironmentObject private var appModel: AppModel
     @State private var baseURL = ""
     @State private var token = ""
+    @State private var openAIKey = ""
+    @State private var imageDetailLevel: ImageNutritionDetailLevel = .basic
     @State private var savedNotice = false
     @State private var isReplayingSync = false
     @State private var replaySyncError: String?
@@ -34,6 +36,35 @@ struct SettingsView: View {
                     Text("מוגדר")
                     Spacer()
                     Text(appModel.apiClient.config.isConfigured ? "כן" : "לא")
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Section {
+                SecureField("מפתח OpenAI (API Key)", text: $openAIKey)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                Picker("פירוט תזונה מתמונה", selection: $imageDetailLevel) {
+                    ForEach(ImageNutritionDetailLevel.allCases) { level in
+                        Text(level.labelHe).tag(level)
+                    }
+                }
+                Button("שמור הגדרות AI") {
+                    ImageNutritionSettings.openAIAPIKey = openAIKey
+                    ImageNutritionSettings.detailLevel = imageDetailLevel
+                    savedNotice = true
+                }
+            } header: {
+                Text("הוספה מתמונה (AI)")
+            } footer: {
+                Text("\(imageDetailLevel.footerHe) המפתח נשמר במכשיר (או ב־Secrets.plist כ־OpenAIAPIKey). התמונה נשלחת ל־OpenAI לניתוח.")
+            }
+
+            Section {
+                HStack {
+                    Text("מפתח OpenAI")
+                    Spacer()
+                    Text(ImageNutritionSettings.isConfigured ? "כן" : "לא")
                         .foregroundStyle(.secondary)
                 }
             }
@@ -72,11 +103,13 @@ struct SettingsView: View {
             let c = APIConfig.load()
             baseURL = c.baseURL
             token = c.token
+            openAIKey = ImageNutritionSettings.openAIAPIKey
+            imageDetailLevel = ImageNutritionSettings.detailLevel
         }
         .alert("נשמר", isPresented: $savedNotice) {
             Button("אישור", role: .cancel) {}
         } message: {
-            Text("ההגדרות נשמרו. סנכרון הבא ישתמש בהן.")
+            Text("ההגדרות נשמרו.")
         }
         .alert("ייבוא מחדש", isPresented: Binding(
             get: { replaySyncError != nil },

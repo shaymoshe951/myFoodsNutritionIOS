@@ -266,6 +266,10 @@ final class AppDatabase {
     func replaceFoodCatalog(with response: FoodCatalogResponse) throws {
         let enc = JSONEncoder()
         try dbQueue.write { db in
+            // Keep locally estimated AI foods (`server_uid < 0`); server export only has positive UIDs.
+            let localAI = try FoodCatalogItemRecord
+                .filter(FoodCatalogItemRecord.Columns.serverUid < 0)
+                .fetchAll(db)
             try FoodCatalogItemRecord.deleteAll(db)
             for item in response.items {
                 let jsonData = try enc.encode(item.nutrients)
@@ -278,6 +282,9 @@ final class AppDatabase {
                 )
                 try row.insert(db)
             }
+            for var ai in localAI {
+                try ai.insert(db)
+            }
             try db.execute(
                 sql: """
                 INSERT INTO sync_state (key, value) VALUES (?, ?)
@@ -287,6 +294,82 @@ final class AppDatabase {
             )
         }
     }
+
+    /// Upserts a locally estimated food (negative `server_uid`) so day totals resolve full nutrients for AI-added diary rows.
+    func upsertLocalAIFoodCatalogItem(itemName: String, nutrients: [String: Double]) throws {
+        let trimmed = itemName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let enc = JSONEncoder()
+        let jsonData = try enc.encode(nutrients)
+        let json = String(data: jsonData, encoding: .utf8) ?? "{}"
+
+        try dbQueue.write { db in
+            if var existing = try FoodCatalogItemRecord
+                .filter(FoodCatalogItemRecord.Columns.itemName == trimmed && FoodCatalogItemRecord.Columns.serverUid < 0)
+                .fetchOne(db)
+            {
+                existing.nutrientsJson = json
+                existing.isExtended = true
+                try existing.update(db)
+                return
+            }
+
+            let minUid = try Int64.fetchOne(
+                db,
+                sql: "SELECT MIN(server_uid) FROM \(FoodCatalogItemRecord.databaseTableName)"
+            ) ?? 0
+            let nextLocalUid = min(minUid, 0) - 1
+            var row = FoodCatalogItemRecord(
+                serverUid: nextLocalUid,
+                itemName: trimmed,
+                isExtended: true,
+                nutrientsJson: json
+            )
+            try row.insert(db)
+        }
+    }
+
+    /// Nutrient keys for AI detailed mode: prefer synced snapshot order; otherwise a built-in extended list.
+    func nutrientKeysForImageAnalysis(detailLevel: ImageNutritionDetailLevel) throws -> [String] {
+        switch detailLevel {
+        case .basic:
+            return ImageNutritionSettings.basicNutrientKeys
+        case .detailed:
+            if let snap = try nutritionSnapshot(), !snap.nutrient_column_order.isEmpty {
+                return snap.nutrient_column_order
+            }
+            return ImageNutritionSettings.basicNutrientKeys + Self.defaultDetailedNutrientKeys
+        }
+    }
+
+    /// Common micronutrient keys when no nutrition snapshot is synced yet.
+    private static let defaultDetailedNutrientKeys = [
+        "dietary_fiber",
+        "sugars_total",
+        "cholesterol",
+        "fatty_acids_total_saturated",
+        "calcium",
+        "iron",
+        "magnesium",
+        "phosphorus",
+        "potassium",
+        "sodium",
+        "zinc",
+        "copper",
+        "manganese",
+        "selenium",
+        "vitamin_c",
+        "thiamin",
+        "riboflavin",
+        "niacin",
+        "vitamin_b6",
+        "folate",
+        "vitamin_b12",
+        "vitamin_a",
+        "vitamin_e",
+        "vitamin_d",
+        "vitamin_k",
+    ]
 
     // MARK: - Nutrition snapshot (`GET nutrition-attributes.php`)
 

@@ -13,6 +13,7 @@ struct DailyDiaryView: View {
     @State private var editLocalId: Int64?
     @State private var editQtyText = ""
     @State private var pendingDelete: PendingDelete?
+    @State private var showFoodImageSheet = false
 
     private struct PendingDelete: Identifiable {
         var id: Int64 { localId }
@@ -163,6 +164,17 @@ struct DailyDiaryView: View {
                                 Task { await submitFoodLine() }
                             }
 
+                        Button {
+                            showFoodImageSheet = true
+                        } label: {
+                            Image(systemName: "camera")
+                                .font(.body)
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.borderless)
+                        .accessibilityLabel("הוספה מתמונה")
+                        .frame(width: 36, height: 36)
+
                         Group {
                             switch foodSpeech.phase {
                             case .idle:
@@ -209,7 +221,7 @@ struct DailyDiaryView: View {
                 } header: {
                     Text("חיפוש והוספה")
                 } footer: {
-                    Text("שורה אחת: שם מזון + מספר גרם (למשל «חלב 200»). «הוסף»/«אוסף» עם התאמה חד־משמעית מוסיפים כמו Enter; «נקה» לבד או אחרי רווח בסוף השורה מרוקן את כל השורה ומאפס הקלטה בקול. ארוחה נקבעת אוטומטית לפי שעת ההוספה, כמו בשרת.")
+                    Text("שורה אחת: שם מזון + מספר גרם (למשל «חלב 200»). מצלמה: ניתוח תזונה מתמונה (+ הנחיה אופציונלית). «הוסף»/«אוסף» עם התאמה חד־משמעית מוסיפים כמו Enter; «נקה» לבד או אחרי רווח בסוף השורה מרוקן את כל השורה ומאפס הקלטה בקול. ארוחה נקבעת אוטומטית לפי שעת ההוספה, כמו בשרת.")
                 }
 
                 if viewModel.items.isEmpty {
@@ -388,6 +400,12 @@ struct DailyDiaryView: View {
                 }
             } message: {
                 Text("האם למחוק את «\(pendingDelete?.itemLabel ?? "")»?")
+            }
+            .sheet(isPresented: $showFoodImageSheet) {
+                FoodImageAddSheet(nutrientKeysForDetail: viewModel.nutrientKeysForImageAnalysis()) { result in
+                    viewModel.addItemFromImageNutrition(result)
+                    focusFoodSearchField()
+                }
             }
             .onAppear {
                 viewModel.load()

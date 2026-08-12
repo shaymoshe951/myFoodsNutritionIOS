@@ -469,6 +469,32 @@ final class DailyDiaryViewModel: ObservableObject {
         }
     }
 
+    /// Stores AI-estimated nutrients in the local catalog (preserved across catalog sync) and adds a diary row.
+    func addItemFromImageNutrition(_ result: FoodImageNutritionResult) {
+        let trimmed = result.itemName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        do {
+            try database.upsertLocalAIFoodCatalogItem(itemName: trimmed, nutrients: result.nutrientsPer100g)
+            addItem(
+                name: trimmed,
+                quantity: max(1, result.quantityGrams),
+                meal: "",
+                time: Self.itmTimeNow(),
+                energyPer100: result.energyPer100
+            )
+            hasLocalFoodCatalog = ((try? database.foodCatalogItemCount()) ?? 0) > 0
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Keys sent to the vision model for the current Settings detail level.
+    func nutrientKeysForImageAnalysis() -> [String] {
+        let level = ImageNutritionSettings.detailLevel
+        return (try? database.nutrientKeysForImageAnalysis(detailLevel: level))
+            ?? ImageNutritionSettings.basicNutrientKeys
+    }
+
     func updateQuantity(localId: Int64, quantity: Int) {
         do {
             try database.updateQuantity(id: localId, quantity: max(1, quantity))

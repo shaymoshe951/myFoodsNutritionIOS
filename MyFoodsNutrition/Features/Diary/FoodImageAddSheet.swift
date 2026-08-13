@@ -44,12 +44,15 @@ struct FoodImageAddSheet: View {
                         PhotosPicker(selection: $pickerItem, matching: .images) {
                             Label("גלריה", systemImage: "photo.on.rectangle")
                         }
+                        .buttonStyle(.borderless)
+
                         if UIImagePickerController.isSourceTypeAvailable(.camera) {
                             Button {
                                 showCamera = true
                             } label: {
                                 Label("מצלמה", systemImage: "camera")
                             }
+                            .buttonStyle(.borderless)
                         }
                     }
                 } header: {

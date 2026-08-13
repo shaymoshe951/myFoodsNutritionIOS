@@ -28,6 +28,9 @@ enum ImageNutritionDetailLevel: String, CaseIterable, Identifiable {
 
 /// Vision-capable OpenAI chat models offered in Settings.
 enum OpenAIVisionModelOption: String, CaseIterable, Identifiable {
+    case gpt56Sol = "gpt-5.6-sol"
+    case gpt56Terra = "gpt-5.6-terra"
+    case gpt56Luna = "gpt-5.6-luna"
     case gpt4o = "gpt-4o"
     case gpt4oMini = "gpt-4o-mini"
     case gpt41 = "gpt-4.1"
@@ -38,6 +41,9 @@ enum OpenAIVisionModelOption: String, CaseIterable, Identifiable {
 
     var labelHe: String {
         switch self {
+        case .gpt56Sol: return "GPT-5.6 Sol"
+        case .gpt56Terra: return "GPT-5.6 Terra"
+        case .gpt56Luna: return "GPT-5.6 Luna"
         case .gpt4o: return "GPT-4o"
         case .gpt4oMini: return "GPT-4o mini"
         case .gpt41: return "GPT-4.1"
@@ -46,10 +52,16 @@ enum OpenAIVisionModelOption: String, CaseIterable, Identifiable {
         }
     }
 
+    /// GPT-5.x chat models often reject `temperature`; use `reasoning_effort` instead.
+    var usesReasoningAPIConstraints: Bool {
+        rawValue.hasPrefix("gpt-5")
+    }
+
     static var defaultOption: OpenAIVisionModelOption { .gpt4o }
 
     static func fromStoredModelId(_ raw: String) -> OpenAIVisionModelOption {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed == "gpt-5.6" { return .gpt56Sol }
         return OpenAIVisionModelOption(rawValue: trimmed) ?? .defaultOption
     }
 }

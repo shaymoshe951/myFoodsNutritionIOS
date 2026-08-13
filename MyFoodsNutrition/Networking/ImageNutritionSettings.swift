@@ -26,13 +26,41 @@ enum ImageNutritionDetailLevel: String, CaseIterable, Identifiable {
     }
 }
 
+/// Vision-capable OpenAI chat models offered in Settings.
+enum OpenAIVisionModelOption: String, CaseIterable, Identifiable {
+    case gpt4o = "gpt-4o"
+    case gpt4oMini = "gpt-4o-mini"
+    case gpt41 = "gpt-4.1"
+    case gpt41Mini = "gpt-4.1-mini"
+    case gpt41Nano = "gpt-4.1-nano"
+
+    var id: String { rawValue }
+
+    var labelHe: String {
+        switch self {
+        case .gpt4o: return "GPT-4o"
+        case .gpt4oMini: return "GPT-4o mini"
+        case .gpt41: return "GPT-4.1"
+        case .gpt41Mini: return "GPT-4.1 mini"
+        case .gpt41Nano: return "GPT-4.1 nano"
+        }
+    }
+
+    static var defaultOption: OpenAIVisionModelOption { .gpt4o }
+
+    static func fromStoredModelId(_ raw: String) -> OpenAIVisionModelOption {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return OpenAIVisionModelOption(rawValue: trimmed) ?? .defaultOption
+    }
+}
+
 /// OpenAI key + image-analysis detail preference (UserDefaults; optional Secrets.plist `OpenAIAPIKey`).
 enum ImageNutritionSettings {
     private static let detailLevelKey = "image_nutrition_detail_level"
     private static let openAIKeyUserDefaults = "openai_api_key"
     private static let openAIModelUserDefaults = "openai_vision_model"
 
-    static let defaultModel = "gpt-4o"
+    static let defaultModel = OpenAIVisionModelOption.defaultOption.rawValue
 
     static var detailLevel: ImageNutritionDetailLevel {
         get {
@@ -66,6 +94,11 @@ enum ImageNutritionSettings {
             let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
             UserDefaults.standard.set(trimmed.isEmpty ? defaultModel : trimmed, forKey: openAIModelUserDefaults)
         }
+    }
+
+    static var visionModelOption: OpenAIVisionModelOption {
+        get { OpenAIVisionModelOption.fromStoredModelId(visionModel) }
+        set { visionModel = newValue.rawValue }
     }
 
     static var isConfigured: Bool {

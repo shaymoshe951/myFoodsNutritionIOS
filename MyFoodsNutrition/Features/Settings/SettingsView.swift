@@ -6,6 +6,7 @@ struct SettingsView: View {
     @State private var token = ""
     @State private var openAIKey = ""
     @State private var imageDetailLevel: ImageNutritionDetailLevel = .basic
+    @State private var visionModel: OpenAIVisionModelOption = .defaultOption
     @State private var savedNotice = false
     @State private var isReplayingSync = false
     @State private var replaySyncError: String?
@@ -44,6 +45,11 @@ struct SettingsView: View {
                 SecureField("מפתח OpenAI (API Key)", text: $openAIKey)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
+                Picker("מודל", selection: $visionModel) {
+                    ForEach(OpenAIVisionModelOption.allCases) { model in
+                        Text(model.labelHe).tag(model)
+                    }
+                }
                 Picker("פירוט תזונה מתמונה", selection: $imageDetailLevel) {
                     ForEach(ImageNutritionDetailLevel.allCases) { level in
                         Text(level.labelHe).tag(level)
@@ -52,12 +58,13 @@ struct SettingsView: View {
                 Button("שמור הגדרות AI") {
                     ImageNutritionSettings.openAIAPIKey = openAIKey
                     ImageNutritionSettings.detailLevel = imageDetailLevel
+                    ImageNutritionSettings.visionModelOption = visionModel
                     savedNotice = true
                 }
             } header: {
                 Text("הוספה מתמונה (AI)")
             } footer: {
-                Text("\(imageDetailLevel.footerHe) המפתח נשמר במכשיר (או ב־Secrets.plist כ־OpenAIAPIKey). התמונה נשלחת ל־OpenAI לניתוח.")
+                Text("מודל: \(visionModel.rawValue). \(imageDetailLevel.footerHe) המפתח נשמר במכשיר (או ב־Secrets.plist כ־OpenAIAPIKey). התמונה נשלחת ל־OpenAI לניתוח.")
             }
 
             Section {
@@ -65,6 +72,12 @@ struct SettingsView: View {
                     Text("מפתח OpenAI")
                     Spacer()
                     Text(ImageNutritionSettings.isConfigured ? "כן" : "לא")
+                        .foregroundStyle(.secondary)
+                }
+                HStack {
+                    Text("מודל")
+                    Spacer()
+                    Text(ImageNutritionSettings.visionModelOption.labelHe)
                         .foregroundStyle(.secondary)
                 }
             }
@@ -105,6 +118,7 @@ struct SettingsView: View {
             token = c.token
             openAIKey = ImageNutritionSettings.openAIAPIKey
             imageDetailLevel = ImageNutritionSettings.detailLevel
+            visionModel = ImageNutritionSettings.visionModelOption
         }
         .alert("נשמר", isPresented: $savedNotice) {
             Button("אישור", role: .cancel) {}

@@ -31,10 +31,10 @@ struct FoodImageNutritionClient {
         let base64 = jpegData.base64EncodedString()
         let dataURL = "data:image/jpeg;base64,\(base64)"
         let userText = Self.userPrompt(optionalPrompt: optionalPrompt, detailLevel: detailLevel, nutrientKeys: keys)
-        let resolvedModel = OpenAIVisionModelOption.fromStoredModelId(model).rawValue
+        let modelOption = OpenAIVisionModelOption.fromStoredModelId(model)
 
         var body: [String: Any] = [
-            "model": resolvedModel,
+            "model": modelOption.rawValue,
             "response_format": ["type": "json_object"],
             "messages": [
                 [
@@ -56,7 +56,7 @@ struct FoodImageNutritionClient {
                 ],
             ],
         ]
-        if OpenAIVisionModelOption.fromStoredModelId(model).usesReasoningAPIConstraints {
+        if modelOption.usesReasoningAPIConstraints {
             // Faster, cheaper estimates; GPT-5.x typically rejects `temperature`.
             body["reasoning_effort"] = "low"
         } else {

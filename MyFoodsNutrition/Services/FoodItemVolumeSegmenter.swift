@@ -44,6 +44,9 @@ enum FoodItemVolumeSegmenter {
         var depthHeight: Int
     }
 
+    /// - Important: `colorImage` must be in the **same sensor frame** as `depthMeters`
+    ///   (ARKit `capturedImage` / `sceneDepth`, not display-rotated). Masks are resampled
+    ///   onto the depth grid by stretch only — a portrait display rotation here breaks alignment.
     static func analyze(
         colorImage: UIImage,
         depthMeters: [Float],

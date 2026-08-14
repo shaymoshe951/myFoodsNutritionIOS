@@ -25,6 +25,10 @@ struct FoodImageAddSheet: View {
     @State private var volumeItems: [FoodVolumeItem] = []
     @State private var tableDetected = false
     @State private var scanQuality: ScanQualityAnalyzer.CaptureQuality?
+    /// Debug folder from the latest LiDAR volume capture (Documents/FoodVolumeScans/...).
+    @State private var debugScanDirectoryURL: URL?
+    /// Height-above-table + mask heatmap from the latest LiDAR capture (debug).
+    @State private var heightDebugImage: UIImage?
 
     private var detailLevel: ImageNutritionDetailLevel {
         ImageNutritionSettings.detailLevel
@@ -153,15 +157,39 @@ struct FoodImageAddSheet: View {
                     Text("רמת פירוט נוכחית: \(detailLevel.labelHe). ניתן לשנות בהגדרות.")
                 }
 
+                if let heightDebugImage {
+                    Section {
+                        Image(uiImage: heightDebugImage)
+                            .resizable()
+                            .interpolation(.none)
+                            .scaledToFit()
+                            .frame(maxWidth: .infinity)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                    } header: {
+                        Text("דיבאג: גובה מעל שולחן + מסיכה")
+                    } footer: {
+                        Text("סולם צבעים מ־0 ס״מ עד גובה מקסימלי בסריקה. קו צהוב = מסיכת מזון.")
+                    }
+                }
+
                 if !analysisItems.isEmpty {
                     Section {
                         ForEach(Array(analysisItems.enumerated()), id: \.offset) { idx, item in
                             VStack(alignment: .leading, spacing: 8) {
                                 TextField("שם המזון", text: editNameBinding(idx))
                                     .multilineTextAlignment(.leading)
-                                TextField("כמות בגרם", text: editGramsBinding(idx))
-                                    .keyboardType(.numberPad)
-                                    .multilineTextAlignment(.leading)
+                                HStack(spacing: 6) {
+                                    TextField("כמות", text: editGramsBinding(idx))
+                                        .keyboardType(.numberPad)
+                                        .multilineTextAlignment(.leading)
+                                    Text("גרם")
+                                        .foregroundStyle(.secondary)
+                                }
+                                if let totalCal = totalCaloriesText(for: idx, nutrients: item.nutrientsPer100g) {
+                                    Text(totalCal)
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundStyle(.primary)
+                                }
                                 if item.volumeMl != nil || item.sourceLabel != nil {
                                     HStack(spacing: 6) {
                                         if let label = item.sourceLabel, !label.isEmpty {
@@ -288,6 +316,17 @@ struct FoodImageAddSheet: View {
         )
     }
 
+    /// Total kcal for the edited weight from energy per 100 g.
+    private func totalCaloriesText(for idx: Int, nutrients: [String: Double]) -> String? {
+        guard let energyPer100 = nutrients["energy"],
+              editGrams.indices.contains(idx),
+              let grams = Int(editGrams[idx]),
+              grams > 0
+        else { return nil }
+        let total = energyPer100 * Double(grams) / 100.0
+        return "\(Int(total.rounded())) קלוריות ל־\(grams) גרם"
+    }
+
     @ViewBuilder
     private func nutrientPreview(_ nuts: [String: Double]) -> some View {
         let order = ImageNutritionSettings.basicNutrientKeys + nuts.keys.filter { !ImageNutritionSettings.basicNutrientKeys.contains($0) }.sorted()
@@ -340,6 +379,8 @@ struct FoodImageAddSheet: View {
             volumeItems = []
             tableDetected = false
             scanQuality = nil
+            debugScanDirectoryURL = nil
+            heightDebugImage = nil
         }
         Task { await runOnDeviceVision(for: image) }
     }
@@ -353,6 +394,8 @@ struct FoodImageAddSheet: View {
         volumeItems = capture.items
         tableDetected = capture.tableDetected
         scanQuality = capture.scanQuality
+        debugScanDirectoryURL = capture.debugScanDirectoryURL
+        heightDebugImage = capture.heightDebugImage
         visionResult = VisionFoodSceneAnalyzer.Result(
             classifications: capture.visionLabels,
             foregroundMask: nil,
@@ -429,17 +472,24 @@ struct FoodImageAddSheet: View {
             if visionResult == nil {
                 await runOnDeviceVision(for: image)
             }
+            let hints = makeOnDeviceHints()
             let results = try await FoodImageNutritionClient().analyzeFoodImage(
                 jpegData: jpeg,
                 optionalPrompt: optionalPrompt,
                 detailLevel: detailLevel,
                 nutrientKeys: nutrientKeysForDetail,
-                onDeviceHints: makeOnDeviceHints()
+                onDeviceHints: hints
             )
             let merged = Self.mergeVolumeEstimations(into: results, volumeItems: volumeItems)
             analysisItems = merged
             editNames = merged.map(\.itemName)
             editGrams = merged.map { String($0.quantityGrams) }
+            FoodVolumeScanDebugStore.saveAIAnalysisIfPossible(
+                scanDirectory: debugScanDirectoryURL,
+                hints: hints,
+                results: merged,
+                jpegSentToAPI: jpeg
+            )
         } catch {
             errorText = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }

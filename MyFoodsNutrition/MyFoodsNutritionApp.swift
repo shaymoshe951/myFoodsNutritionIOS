@@ -4,6 +4,10 @@ import SwiftUI
 struct MyFoodsNutritionApp: App {
     @StateObject private var appModel = AppModel()
 
+    init() {
+        FoodVolumeScanDebugStore.ensureRootDirectoryExists()
+    }
+
     var body: some Scene {
         WindowGroup {
             ContentView()

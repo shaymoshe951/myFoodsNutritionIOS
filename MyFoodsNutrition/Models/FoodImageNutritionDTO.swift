@@ -1,23 +1,29 @@
 import Foundation
 
 /// Parsed result from vision AI for one food in an image (values are **per 100 g**).
-struct FoodImageNutritionResult: Equatable {
+struct FoodImageNutritionResult: Equatable, Identifiable {
+    var id: String { "\(itemName)-\(quantityGrams)-\(nutrientsPer100g.count)" }
     var itemName: String
     var quantityGrams: Int
     /// Nutrient key → amount per 100 g (same keys as `food_catalog_item.nutrients_json`).
     var nutrientsPer100g: [String: Double]
     var notes: String?
+    /// Optional on-device label / volume that produced this row.
+    var sourceLabel: String?
+    var volumeMl: Double?
 
     var energyPer100: Double? {
         nutrientsPer100g["energy"]
     }
 }
 
-struct FoodImageNutritionPayload: Decodable {
+struct FoodImageNutritionItemPayload: Decodable {
     var item_name: String?
     var quantity_grams: Double?
     var nutrients_per_100g: [String: Double]?
     var notes: String?
+    var source_label: String?
+    var volume_ml: Double?
 
     func toResult() throws -> FoodImageNutritionResult {
         let name = (item_name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -35,8 +41,33 @@ struct FoodImageNutritionPayload: Decodable {
             itemName: name,
             quantityGrams: qty,
             nutrientsPer100g: nuts,
-            notes: (notesTrim?.isEmpty == false) ? notesTrim : nil
+            notes: (notesTrim?.isEmpty == false) ? notesTrim : nil,
+            sourceLabel: source_label,
+            volumeMl: volume_ml
         )
+    }
+}
+
+/// Supports either a single object or `{ "items": [ ... ] }`.
+struct FoodImageNutritionPayload: Decodable {
+    var item_name: String?
+    var quantity_grams: Double?
+    var nutrients_per_100g: [String: Double]?
+    var notes: String?
+    var items: [FoodImageNutritionItemPayload]?
+
+    func toResults() throws -> [FoodImageNutritionResult] {
+        if let items, !items.isEmpty {
+            return try items.map { try $0.toResult() }
+        }
+        return try [FoodImageNutritionItemPayload(
+            item_name: item_name,
+            quantity_grams: quantity_grams,
+            nutrients_per_100g: nutrients_per_100g,
+            notes: notes,
+            source_label: nil,
+            volume_ml: nil
+        ).toResult()]
     }
 }
 

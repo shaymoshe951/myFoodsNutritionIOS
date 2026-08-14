@@ -38,6 +38,7 @@
 		BF0030 /* VisionFoodSceneAnalyzer.swift in Sources */ = {isa = PBXBuildFile; fileRef = FR0030 /* VisionFoodSceneAnalyzer.swift */; };
 		BF0031 /* FoodVolumeEstimator.swift in Sources */ = {isa = PBXBuildFile; fileRef = FR0031 /* FoodVolumeEstimator.swift */; };
 		BF0032 /* FoodLiDARCaptureSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = FR0032 /* FoodLiDARCaptureSheet.swift */; };
+		BF0033 /* FoodItemVolumeSegmenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = FR0033 /* FoodItemVolumeSegmenter.swift */; };
 		BF0017 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = PKG001 /* GRDB */; };
 /* End PBXBuildFile section */
 
@@ -73,6 +74,7 @@
 		FR0030 /* VisionFoodSceneAnalyzer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisionFoodSceneAnalyzer.swift; sourceTree = "<group>"; };
 		FR0031 /* FoodVolumeEstimator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoodVolumeEstimator.swift; sourceTree = "<group>"; };
 		FR0032 /* FoodLiDARCaptureSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoodLiDARCaptureSheet.swift; sourceTree = "<group>"; };
+		FR0033 /* FoodItemVolumeSegmenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoodItemVolumeSegmenter.swift; sourceTree = "<group>"; };
 		PR0001 /* MyFoodsNutrition.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MyFoodsNutrition.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -174,6 +176,7 @@
 				FR0025 /* FoodSearchSpeechService.swift */,
 				FR0030 /* VisionFoodSceneAnalyzer.swift */,
 				FR0031 /* FoodVolumeEstimator.swift */,
+				FR0033 /* FoodItemVolumeSegmenter.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -320,6 +323,7 @@
 				BF0030 /* VisionFoodSceneAnalyzer.swift in Sources */,
 				BF0031 /* FoodVolumeEstimator.swift in Sources */,
 				BF0032 /* FoodLiDARCaptureSheet.swift in Sources */,
+				BF0033 /* FoodItemVolumeSegmenter.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

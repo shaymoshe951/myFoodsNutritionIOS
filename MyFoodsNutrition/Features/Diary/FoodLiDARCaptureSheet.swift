@@ -5,10 +5,12 @@ import UIKit
 
 struct FoodDepthCaptureResult: Equatable {
     var colorImage: UIImage
-    var volume: FoodVolumeEstimator.Result
-    var vision: VisionFoodSceneAnalyzer.Result
-    var estimatedGrams: Int
-    var densityGPerMl: Double
+    var items: [FoodVolumeItem]
+    var visionLabels: [VisionFoodSceneAnalyzer.Classification]
+    var tableDetected: Bool
+
+    var totalVolumeMl: Double { items.reduce(0) { $0 + $1.volumeMl } }
+    var totalEstimatedGrams: Int { items.reduce(0) { $0 + $1.estimatedGrams } }
 }
 
 /// Captures one LiDAR scene-depth frame, segments food with Vision, estimates volume above the table plane.
@@ -28,7 +30,7 @@ struct FoodLiDARCaptureSheet: View {
 
                 VStack {
                     Spacer()
-                    Text("כוונו מעל המזון על שולחן שטוח והקפיאו פריים.")
+                    Text("כוונו מעל המזון על שולחן שטוח. צלחת/קערה יוסרו כשאפשר; כמה פריטים → נפח לכל אחד.")
                         .font(.footnote)
                         .multilineTextAlignment(.center)
                         .padding(10)
@@ -151,7 +153,6 @@ final class FoodLiDARCaptureModel: ObservableObject {
         guard let sceneDepth = frame.sceneDepth else { throw FoodLiDARCaptureError.noDepth }
 
         let colorImage = try Self.uiImage(from: frame.capturedImage)
-        let vision = try await VisionFoodSceneAnalyzer.analyze(colorImage)
 
         let depthBuffer = sceneDepth.depthMap
         let depthW = CVPixelBufferGetWidth(depthBuffer)
@@ -170,24 +171,22 @@ final class FoodLiDARCaptureModel: ObservableObject {
             cy: m.columns.2.y * sy
         )
 
-        let mask = Self.resampleMask(vision.foregroundMask, toWidth: depthW, height: depthH)
-        let volume = try FoodVolumeEstimator.estimateVolume(
+        let segmented = try await FoodItemVolumeSegmenter.analyze(
+            colorImage: colorImage,
             depthMeters: depth,
-            width: depthW,
-            height: depthH,
-            intrinsics: K,
-            mask01: mask
+            depthWidth: depthW,
+            depthHeight: depthH,
+            intrinsics: K
         )
-
-        let density = VisionFoodSceneAnalyzer.suggestedDensityGPerMl(from: vision.classifications)
-        let grams = max(1, Int((volume.volumeMl * density).rounded()))
+        guard !segmented.items.isEmpty else {
+            throw FoodVolumeEstimator.EstimateError.noFoodPixels
+        }
 
         return FoodDepthCaptureResult(
             colorImage: colorImage,
-            volume: volume,
-            vision: vision,
-            estimatedGrams: grams,
-            densityGPerMl: density
+            items: segmented.items,
+            visionLabels: segmented.sceneClassifications,
+            tableDetected: segmented.tableDetected
         )
     }
 
@@ -214,21 +213,6 @@ final class FoodLiDARCaptureModel: ObservableObject {
             let row = base.advanced(by: y * bytesPerRow).assumingMemoryBound(to: Float.self)
             for x in 0 ..< w {
                 out[y * w + x] = row[x]
-            }
-        }
-        return out
-    }
-
-    private static func resampleMask(_ mask: [[Float]]?, toWidth width: Int, height: Int) -> [Float]? {
-        guard let mask, !mask.isEmpty, let first = mask.first, !first.isEmpty else { return nil }
-        let srcH = mask.count
-        let srcW = first.count
-        var out = Array(repeating: Float(0), count: width * height)
-        for y in 0 ..< height {
-            let sy = min(srcH - 1, Int((Double(y) + 0.5) * Double(srcH) / Double(height)))
-            for x in 0 ..< width {
-                let sx = min(srcW - 1, Int((Double(x) + 0.5) * Double(srcW) / Double(width)))
-                out[y * width + x] = mask[sy][sx]
             }
         }
         return out

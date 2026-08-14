@@ -7,6 +7,7 @@ struct FoodImageAddSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     let nutrientKeysForDetail: [String]
+    /// Called once per food item to add (multi-item LiDAR/AI may invoke several times via batch confirm).
     var onConfirm: (FoodImageNutritionResult) -> Void
 
     @State private var pickerItem: PhotosPickerItem?
@@ -17,13 +18,12 @@ struct FoodImageAddSheet: View {
     @State private var isAnalyzing = false
     @State private var isRunningOnDeviceVision = false
     @State private var errorText: String?
-    @State private var analysis: FoodImageNutritionResult?
-    @State private var editName = ""
-    @State private var editGramsText = ""
+    @State private var analysisItems: [FoodImageNutritionResult] = []
+    @State private var editNames: [String] = []
+    @State private var editGrams: [String] = []
     @State private var visionResult: VisionFoodSceneAnalyzer.Result?
-    @State private var volumeResult: FoodVolumeEstimator.Result?
-    @State private var volumeEstimatedGrams: Int?
-    @State private var volumeDensity: Double?
+    @State private var volumeItems: [FoodVolumeItem] = []
+    @State private var tableDetected = false
 
     private var detailLevel: ImageNutritionDetailLevel {
         ImageNutritionSettings.detailLevel
@@ -78,7 +78,7 @@ struct FoodImageAddSheet: View {
                     Text("תמונה")
                 } footer: {
                     if lidarAvailable {
-                        Text("«נפח» משתמש ב־LiDAR + סגמנטציה במכשיר להערכת מ״ל/גרם.")
+                        Text("«נפח»: LiDAR + הפרדת פריטים; צלחת/קערה מסוננות כשאפשר. לכל פריט נשלחים label+volume ל־AI.")
                     }
                 }
 
@@ -94,13 +94,8 @@ struct FoodImageAddSheet: View {
 
                 if let visionResult {
                     Section {
-                        if visionResult.tableDetected {
+                        if visionResult.tableDetected || tableDetected {
                             Label("זוהה שולחן/משטח", systemImage: "table.furniture")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        if visionResult.foregroundMask != nil {
-                            Label("מסכת מזון (סגמנטציה) זמינה", systemImage: "circle.dashed")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -114,33 +109,32 @@ struct FoodImageAddSheet: View {
                             .font(.caption)
                         }
                     } header: {
-                        Text("סיווג במכשיר (Apple Vision)")
+                        Text("סיווג סצנה (Apple Vision)")
                     }
                 }
 
-                if let volumeResult {
+                if !volumeItems.isEmpty {
                     Section {
-                        LabeledContent("נפח") {
-                            Text("\(Int(volumeResult.volumeMl.rounded())) מ״ל")
-                        }
-                        LabeledContent("טביעת רגל") {
-                            Text(String(format: "%.0f×%.0f ס״מ", volumeResult.footprintLengthCm, volumeResult.footprintWidthCm))
-                        }
-                        LabeledContent("גובה (חציון)") {
-                            Text(String(format: "%.1f ס״מ", volumeResult.medianHeightCm))
-                        }
-                        if let grams = volumeEstimatedGrams {
-                            LabeledContent("גרם משוער") {
-                                Text("\(grams) ג׳")
+                        ForEach(volumeItems) { item in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(item.label)
+                                    .font(.subheadline.weight(.semibold))
+                                Text(
+                                    String(
+                                        format: "%.0f מ״ל · %d ג׳ · %.0f×%.0f ס״מ · גובה %.1f",
+                                        item.volumeMl,
+                                        item.estimatedGrams,
+                                        item.footprintLengthCm,
+                                        item.footprintWidthCm,
+                                        item.medianHeightCm
+                                    )
+                                )
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                             }
                         }
-                        if let density = volumeDensity {
-                            Text(String(format: "צפיפות משוערת %.2f ג׳/מ״ל לפי תוויות Vision", density))
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
                     } header: {
-                        Text("נפח מ־LiDAR")
+                        Text("פריטים עם נפח (בלי צלחת/קערה)")
                     }
                 }
 
@@ -154,25 +148,33 @@ struct FoodImageAddSheet: View {
                     Text("רמת פירוט נוכחית: \(detailLevel.labelHe). ניתן לשנות בהגדרות.")
                 }
 
-                if let analysis {
+                if !analysisItems.isEmpty {
                     Section {
-                        TextField("שם המזון", text: $editName)
-                            .multilineTextAlignment(.leading)
-                        TextField("כמות בגרם", text: $editGramsText)
-                            .keyboardType(.numberPad)
-                            .multilineTextAlignment(.leading)
-                        nutrientPreview(analysis.nutrientsPer100g)
-                        if let notes = analysis.notes, !notes.isEmpty {
-                            Text(notes)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .multilineTextAlignment(.leading)
+                        ForEach(Array(analysisItems.enumerated()), id: \.offset) { idx, item in
+                            VStack(alignment: .leading, spacing: 8) {
+                                TextField("שם המזון", text: editNameBinding(idx))
+                                    .multilineTextAlignment(.leading)
+                                TextField("כמות בגרם", text: editGramsBinding(idx))
+                                    .keyboardType(.numberPad)
+                                    .multilineTextAlignment(.leading)
+                                if let vol = item.volumeMl {
+                                    Text(String(format: "נפח במכשיר: %.0f מ״ל", vol))
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                                nutrientPreview(item.nutrientsPer100g)
+                                if let notes = item.notes, !notes.isEmpty {
+                                    Text(notes)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .padding(.vertical, 4)
                         }
                     } header: {
-                        Text("תוצאת ניתוח")
+                        Text(analysisItems.count > 1 ? "תוצאות ניתוח (\(analysisItems.count))" : "תוצאת ניתוח")
                     } footer: {
-                        Text("הערכים הם ל־100 גרם. ניתן לערוך שם וכמות לפני הוספה ליומן.")
+                        Text("הערכים הם ל־100 גרם. כל פריט יתווסף ליומן בנפרד.")
                     }
                 }
 
@@ -183,18 +185,18 @@ struct FoodImageAddSheet: View {
                             Text("מנתח תמונה…")
                                 .foregroundStyle(.secondary)
                         }
-                    } else if analysis == nil {
+                    } else if analysisItems.isEmpty {
                         Button("נתח תזונה מהתמונה") {
                             Task { await analyze() }
                         }
                         .disabled(selectedImage == nil || !ImageNutritionSettings.isConfigured)
                     } else {
-                        Button("הוסף ליומן") {
+                        Button(analysisItems.count > 1 ? "הוסף הכל ליומן" : "הוסף ליומן") {
                             commitAdd()
                         }
                         .disabled(!canCommit)
                         Button("נתח שוב", role: .destructive) {
-                            analysis = nil
+                            analysisItems = []
                             Task { await analyze() }
                         }
                         .disabled(selectedImage == nil || isAnalyzing)
@@ -244,10 +246,34 @@ struct FoodImageAddSheet: View {
     }
 
     private var canCommit: Bool {
-        guard analysis != nil else { return false }
-        let nameOK = !editName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        let gramsOK = Int(editGramsText).map { $0 > 0 } ?? false
-        return nameOK && gramsOK
+        guard !analysisItems.isEmpty, editNames.count == analysisItems.count, editGrams.count == analysisItems.count else {
+            return false
+        }
+        for i in analysisItems.indices {
+            guard !editNames[i].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+            guard let g = Int(editGrams[i]), g > 0 else { return false }
+        }
+        return true
+    }
+
+    private func editNameBinding(_ idx: Int) -> Binding<String> {
+        Binding(
+            get: { editNames.indices.contains(idx) ? editNames[idx] : "" },
+            set: { newValue in
+                while editNames.count <= idx { editNames.append("") }
+                editNames[idx] = newValue
+            }
+        )
+    }
+
+    private func editGramsBinding(_ idx: Int) -> Binding<String> {
+        Binding(
+            get: { editGrams.indices.contains(idx) ? editGrams[idx] : "" },
+            set: { newValue in
+                while editGrams.count <= idx { editGrams.append("") }
+                editGrams[idx] = newValue
+            }
+        )
     }
 
     @ViewBuilder
@@ -293,31 +319,37 @@ struct FoodImageAddSheet: View {
 
     private func applyNewImage(_ image: UIImage, clearVolume: Bool) {
         selectedImage = image
-        analysis = nil
+        analysisItems = []
+        editNames = []
+        editGrams = []
         errorText = nil
         visionResult = nil
         if clearVolume {
-            volumeResult = nil
-            volumeEstimatedGrams = nil
-            volumeDensity = nil
+            volumeItems = []
+            tableDetected = false
         }
         Task { await runOnDeviceVision(for: image) }
     }
 
     private func applyLiDARCapture(_ capture: FoodDepthCaptureResult) {
         selectedImage = capture.colorImage
-        analysis = nil
+        analysisItems = []
+        editNames = []
+        editGrams = []
         errorText = nil
-        visionResult = capture.vision
-        volumeResult = capture.volume
-        volumeEstimatedGrams = capture.estimatedGrams
-        volumeDensity = capture.densityGPerMl
-        editGramsText = String(capture.estimatedGrams)
-        if let name = capture.vision.suggestedFoodNameEn {
-            // Prefill prompt only; AI will localize Hebrew name.
-            if optionalPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                optionalPrompt = "Vision label: \(name); volume \(Int(capture.volume.volumeMl.rounded())) ml"
-            }
+        volumeItems = capture.items
+        tableDetected = capture.tableDetected
+        visionResult = VisionFoodSceneAnalyzer.Result(
+            classifications: capture.visionLabels,
+            foregroundMask: nil,
+            imageWidth: Int(capture.colorImage.size.width),
+            imageHeight: Int(capture.colorImage.size.height)
+        )
+        if optionalPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let summary = capture.items.map {
+                "\($0.label)~\(Int($0.volumeMl.rounded()))ml/\($0.estimatedGrams)g"
+            }.joined(separator: "; ")
+            optionalPrompt = "On-device items: \(summary)"
         }
     }
 
@@ -328,12 +360,10 @@ struct FoodImageAddSheet: View {
             let result = try await VisionFoodSceneAnalyzer.analyze(image)
             await MainActor.run {
                 visionResult = result
+                tableDetected = result.tableDetected
             }
         } catch {
-            // Vision assist is optional; don't block AI analysis.
-            await MainActor.run {
-                visionResult = nil
-            }
+            await MainActor.run { visionResult = nil }
         }
     }
 
@@ -354,15 +384,27 @@ struct FoodImageAddSheet: View {
     }
 
     private func makeOnDeviceHints() -> FoodImageOnDeviceHints? {
+        if !volumeItems.isEmpty {
+            let output = FoodItemVolumeSegmenter.Output(
+                items: volumeItems,
+                sceneClassifications: visionResult?.classifications ?? [],
+                tableDetected: tableDetected,
+                combinedFoodMask01: nil,
+                depthWidth: 0,
+                depthHeight: 0
+            )
+            return FoodImageOnDeviceHints.fromVolumeSegmentation(output)
+        }
         let labels = (visionResult?.classifications ?? []).map {
             FoodImageOnDeviceHints.LabelHint(id: $0.identifier, confidence: $0.confidence)
         }
         let hints = FoodImageOnDeviceHints(
             visionLabels: labels,
             tableDetected: visionResult?.tableDetected,
-            volumeMl: volumeResult?.volumeMl,
-            estimatedGramsFromVolume: volumeEstimatedGrams,
-            densityGPerMl: volumeDensity
+            volumeItems: [],
+            volumeMl: nil,
+            estimatedGramsFromVolume: nil,
+            densityGPerMl: nil
         )
         return hints.isEmpty ? nil : hints
     }
@@ -381,20 +423,19 @@ struct FoodImageAddSheet: View {
             if visionResult == nil {
                 await runOnDeviceVision(for: image)
             }
-            let keys = nutrientKeysForDetail
-            let result = try await FoodImageNutritionClient().analyzeFoodImage(
+            let results = try await FoodImageNutritionClient().analyzeFoodImage(
                 jpegData: jpeg,
                 optionalPrompt: optionalPrompt,
                 detailLevel: detailLevel,
-                nutrientKeys: keys,
+                nutrientKeys: nutrientKeysForDetail,
                 onDeviceHints: makeOnDeviceHints()
             )
-            analysis = result
-            editName = result.itemName
-            if let volumeGrams = volumeEstimatedGrams, volumeGrams > 0 {
-                editGramsText = String(volumeGrams)
+            analysisItems = results
+            editNames = results.map(\.itemName)
+            if !volumeItems.isEmpty, volumeItems.count == results.count {
+                editGrams = volumeItems.map { String($0.estimatedGrams) }
             } else {
-                editGramsText = String(result.quantityGrams)
+                editGrams = results.map { String($0.quantityGrams) }
             }
         } catch {
             errorText = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
@@ -402,12 +443,17 @@ struct FoodImageAddSheet: View {
     }
 
     private func commitAdd() {
-        guard var result = analysis else { return }
-        let name = editName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty, let grams = Int(editGramsText), grams > 0 else { return }
-        result.itemName = name
-        result.quantityGrams = grams
-        onConfirm(result)
+        guard canCommit else { return }
+        for i in analysisItems.indices {
+            var result = analysisItems[i]
+            result.itemName = editNames[i].trimmingCharacters(in: .whitespacesAndNewlines)
+            result.quantityGrams = Int(editGrams[i]) ?? result.quantityGrams
+            if volumeItems.indices.contains(i) {
+                result.sourceLabel = volumeItems[i].label
+                result.volumeMl = volumeItems[i].volumeMl
+            }
+            onConfirm(result)
+        }
         dismiss()
     }
 }

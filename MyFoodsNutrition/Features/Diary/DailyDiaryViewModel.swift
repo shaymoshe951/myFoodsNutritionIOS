@@ -488,6 +488,12 @@ final class DailyDiaryViewModel: ObservableObject {
         }
     }
 
+    func addItemsFromImageNutrition(_ results: [FoodImageNutritionResult]) {
+        for r in results {
+            addItemFromImageNutrition(r)
+        }
+    }
+
     /// Keys sent to the vision model for the current Settings detail level.
     func nutrientKeysForImageAnalysis() -> [String] {
         let level = ImageNutritionSettings.detailLevel

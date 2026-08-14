@@ -35,6 +35,10 @@
 		BF0027 /* FoodImageNutritionDTO.swift in Sources */ = {isa = PBXBuildFile; fileRef = FR0027 /* FoodImageNutritionDTO.swift */; };
 		BF0028 /* FoodImageNutritionClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = FR0028 /* FoodImageNutritionClient.swift */; };
 		BF0029 /* FoodImageAddSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = FR0029 /* FoodImageAddSheet.swift */; };
+		BF0030 /* VisionFoodSceneAnalyzer.swift in Sources */ = {isa = PBXBuildFile; fileRef = FR0030 /* VisionFoodSceneAnalyzer.swift */; };
+		BF0031 /* FoodVolumeEstimator.swift in Sources */ = {isa = PBXBuildFile; fileRef = FR0031 /* FoodVolumeEstimator.swift */; };
+		BF0032 /* FoodLiDARCaptureSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = FR0032 /* FoodLiDARCaptureSheet.swift */; };
+		BF0033 /* FoodItemVolumeSegmenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = FR0033 /* FoodItemVolumeSegmenter.swift */; };
 		BF0017 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = PKG001 /* GRDB */; };
 /* End PBXBuildFile section */
 
@@ -67,6 +71,10 @@
 		FR0027 /* FoodImageNutritionDTO.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoodImageNutritionDTO.swift; sourceTree = "<group>"; };
 		FR0028 /* FoodImageNutritionClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoodImageNutritionClient.swift; sourceTree = "<group>"; };
 		FR0029 /* FoodImageAddSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoodImageAddSheet.swift; sourceTree = "<group>"; };
+		FR0030 /* VisionFoodSceneAnalyzer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisionFoodSceneAnalyzer.swift; sourceTree = "<group>"; };
+		FR0031 /* FoodVolumeEstimator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoodVolumeEstimator.swift; sourceTree = "<group>"; };
+		FR0032 /* FoodLiDARCaptureSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoodLiDARCaptureSheet.swift; sourceTree = "<group>"; };
+		FR0033 /* FoodItemVolumeSegmenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoodItemVolumeSegmenter.swift; sourceTree = "<group>"; };
 		PR0001 /* MyFoodsNutrition.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MyFoodsNutrition.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -166,6 +174,9 @@
 			children = (
 				FR0012 /* NetworkPathMonitor.swift */,
 				FR0025 /* FoodSearchSpeechService.swift */,
+				FR0030 /* VisionFoodSceneAnalyzer.swift */,
+				FR0031 /* FoodVolumeEstimator.swift */,
+				FR0033 /* FoodItemVolumeSegmenter.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -193,6 +204,7 @@
 				FR0013 /* DailyDiaryView.swift */,
 				FR0014 /* DailyDiaryViewModel.swift */,
 				FR0029 /* FoodImageAddSheet.swift */,
+				FR0032 /* FoodLiDARCaptureSheet.swift */,
 			);
 			path = Diary;
 			sourceTree = "<group>";
@@ -308,6 +320,10 @@
 				BF0027 /* FoodImageNutritionDTO.swift in Sources */,
 				BF0028 /* FoodImageNutritionClient.swift in Sources */,
 				BF0029 /* FoodImageAddSheet.swift in Sources */,
+				BF0030 /* VisionFoodSceneAnalyzer.swift in Sources */,
+				BF0031 /* FoodVolumeEstimator.swift in Sources */,
+				BF0032 /* FoodLiDARCaptureSheet.swift in Sources */,
+				BF0033 /* FoodItemVolumeSegmenter.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -374,7 +390,7 @@
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "האפליקציה צריכה גישה למיקרופון כדי להמיר דיבור לטקסט בחיפוש מזון.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "האפליקציה צריכה זיהוי דיבור כדי להזין את חיפוש המזון בקול.";
-				INFOPLIST_KEY_NSCameraUsageDescription = "האפליקציה צריכה גישה למצלמה כדי לצלם מזון ולנתח ערכים תזונתיים.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "האפליקציה צריכה גישה למצלמה כדי לצלם מזון, לסרוק נפח ב־LiDAR ולנתח ערכים תזונתיים.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "האפליקציה צריכה גישה לתמונות כדי לבחור תמונת מזון לניתוח תזונתי.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -407,7 +423,7 @@
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "האפליקציה צריכה גישה למיקרופון כדי להמיר דיבור לטקסט בחיפוש מזון.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "האפליקציה צריכה זיהוי דיבור כדי להזין את חיפוש המזון בקול.";
-				INFOPLIST_KEY_NSCameraUsageDescription = "האפליקציה צריכה גישה למצלמה כדי לצלם מזון ולנתח ערכים תזונתיים.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "האפליקציה צריכה גישה למצלמה כדי לצלם מזון, לסרוק נפח ב־LiDAR ולנתח ערכים תזונתיים.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "האפליקציה צריכה גישה לתמונות כדי לבחור תמונת מזון לניתוח תזונתי.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",

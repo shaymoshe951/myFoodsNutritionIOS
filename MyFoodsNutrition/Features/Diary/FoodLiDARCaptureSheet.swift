@@ -508,19 +508,57 @@ enum FoodVolumeHeightDebugRenderer {
         let scaled = resized(base, width: scaledW, height: scaledH) ?? base
 
         let titleH = 28
+        let legendGap = 10
+        let barW = 22
+        let labelW = 52
+        let legendW = legendGap + barW + 6 + labelW
+        let canvasW = scaledW + legendW + 12
+        let canvasH = scaledH + titleH
         let format = UIGraphicsImageRendererFormat.default()
         format.scale = 1
-        let renderer = UIGraphicsImageRenderer(size: CGSize(width: scaledW, height: scaledH + titleH), format: format)
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: canvasW, height: canvasH), format: format)
         return renderer.image { ctx in
+            let cg = ctx.cgContext
             UIColor(white: 0.12, alpha: 1).setFill()
-            ctx.fill(CGRect(x: 0, y: 0, width: scaledW, height: scaledH + titleH))
-            scaled.draw(in: CGRect(x: 0, y: titleH, width: scaledW, height: scaledH))
+            ctx.fill(CGRect(x: 0, y: 0, width: canvasW, height: canvasH))
+
+            scaled.draw(in: CGRect(x: 8, y: titleH, width: scaledW, height: scaledH))
+
             let title = String(format: "Height above table 0…%.1f cm + mask", hiCm)
-            let attrs: [NSAttributedString.Key: Any] = [
+            let titleAttrs: [NSAttributedString.Key: Any] = [
                 .font: UIFont.systemFont(ofSize: 14, weight: .medium),
                 .foregroundColor: UIColor.white,
             ]
-            (title as NSString).draw(at: CGPoint(x: 8, y: 6), withAttributes: attrs)
+            (title as NSString).draw(at: CGPoint(x: 8, y: 6), withAttributes: titleAttrs)
+
+            // Vertical color bar (top = max, bottom = 0).
+            let barX = CGFloat(8 + scaledW + legendGap)
+            let barY = CGFloat(titleH)
+            let barRect = CGRect(x: barX, y: barY, width: CGFloat(barW), height: CGFloat(scaledH))
+            for row in 0 ..< scaledH {
+                let t = 1 - Float(row) / Float(max(scaledH - 1, 1))
+                let (r, g, b) = turboLike(t)
+                cg.setFillColor(UIColor(red: CGFloat(r) / 255, green: CGFloat(g) / 255, blue: CGFloat(b) / 255, alpha: 1).cgColor)
+                cg.fill(CGRect(x: barRect.minX, y: barRect.minY + CGFloat(row), width: barRect.width, height: 1))
+            }
+            UIColor.white.withAlphaComponent(0.55).setStroke()
+            cg.setLineWidth(1)
+            cg.stroke(barRect.insetBy(dx: 0.5, dy: 0.5))
+
+            let labelAttrs: [NSAttributedString.Key: Any] = [
+                .font: UIFont.monospacedDigitSystemFont(ofSize: 12, weight: .regular),
+                .foregroundColor: UIColor.white,
+            ]
+            let midCm = hiCm * 0.5
+            let labels: [(String, CGFloat)] = [
+                (String(format: "%.1f cm", hiCm), barY),
+                (String(format: "%.1f cm", midCm), barY + CGFloat(scaledH) * 0.5 - 7),
+                ("0 cm", barY + CGFloat(scaledH) - 14),
+            ]
+            let labelX = barX + CGFloat(barW) + 6
+            for (text, y) in labels {
+                (text as NSString).draw(at: CGPoint(x: labelX, y: y), withAttributes: labelAttrs)
+            }
         }
     }
 

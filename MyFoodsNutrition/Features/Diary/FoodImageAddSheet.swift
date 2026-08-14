@@ -87,66 +87,6 @@ struct FoodImageAddSheet: View {
                     }
                 }
 
-                if isRunningOnDeviceVision {
-                    Section {
-                        HStack(spacing: 10) {
-                            ProgressView()
-                            Text("מנתח במכשיר (סיווג/סגמנטציה)…")
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-
-                if let visionResult {
-                    Section {
-                        if visionResult.tableDetected || tableDetected {
-                            Label("זוהה שולחן/משטח", systemImage: "table.furniture")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        ForEach(visionResult.classifications.prefix(6)) { item in
-                            HStack {
-                                Text(item.identifier)
-                                Spacer()
-                                Text("\(Int((item.confidence * 100).rounded()))%")
-                                    .foregroundStyle(.secondary)
-                            }
-                            .font(.caption)
-                        }
-                    } header: {
-                        Text("סיווג סצנה (Apple Vision)")
-                    }
-                }
-
-                if !volumeItems.isEmpty {
-                    Section {
-                        ForEach(volumeItems) { item in
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(item.label)
-                                    .font(.subheadline.weight(.semibold))
-                                Text(
-                                    String(
-                                        format: "%.0f מ״ל · %.0f×%.0f ס״מ · גובה %.1f",
-                                        item.volumeMl,
-                                        item.footprintLengthCm,
-                                        item.footprintWidthCm,
-                                        item.medianHeightCm
-                                    )
-                                )
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            }
-                        }
-                        
-                        // Scan quality indicator
-                        if let quality = scanQuality {
-                            ScanQualityResultView(quality: quality)
-                        }
-                    } header: {
-                        Text("פריטים עם נפח (בלי צלחת/קערה)")
-                    }
-                }
-
                 Section {
                     TextField("למשל: חצי מנה, בלי רוטב…", text: $optionalPrompt, axis: .vertical)
                         .lineLimit(2 ... 4)
@@ -157,18 +97,46 @@ struct FoodImageAddSheet: View {
                     Text("רמת פירוט נוכחית: \(detailLevel.labelHe). ניתן לשנות בהגדרות.")
                 }
 
-                if let heightDebugImage {
+                Section {
+                    if isAnalyzing {
+                        HStack(spacing: 10) {
+                            ProgressView()
+                            Text("מנתח תמונה…")
+                                .foregroundStyle(.secondary)
+                        }
+                    } else if analysisItems.isEmpty {
+                        Button("נתח תזונה מהתמונה") {
+                            Task { await analyze() }
+                        }
+                        .disabled(selectedImage == nil || !ImageNutritionSettings.isConfigured)
+                    } else {
+                        Button(analysisItems.count > 1 ? "הוסף הכל ליומן" : "הוסף ליומן") {
+                            commitAdd()
+                        }
+                        .disabled(!canCommit)
+                        Button("נתח שוב", role: .destructive) {
+                            analysisItems = []
+                            Task { await analyze() }
+                        }
+                        .disabled(selectedImage == nil || isAnalyzing)
+                    }
+                }
+
+                if !ImageNutritionSettings.isConfigured {
                     Section {
-                        Image(uiImage: heightDebugImage)
-                            .resizable()
-                            .interpolation(.none)
-                            .scaledToFit()
-                            .frame(maxWidth: .infinity)
-                            .clipShape(RoundedRectangle(cornerRadius: 8))
-                    } header: {
-                        Text("דיבאג: גובה מעל שולחן + מסיכה")
-                    } footer: {
-                        Text("סולם צבעים מ־0 ס״מ עד גובה מקסימלי בסריקה. קו צהוב = מסיכת מזון.")
+                        Text("חסר מפתח OpenAI — הגדירו אותו במסך ההגדרות.")
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+
+                if let errorText {
+                    Section {
+                        Text(errorText)
+                            .foregroundStyle(.red)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .multilineTextAlignment(.leading)
                     }
                 }
 
@@ -218,46 +186,77 @@ struct FoodImageAddSheet: View {
                     }
                 }
 
-                Section {
-                    if isAnalyzing {
+                if !volumeItems.isEmpty {
+                    Section {
+                        ForEach(volumeItems) { item in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(item.label)
+                                    .font(.subheadline.weight(.semibold))
+                                Text(
+                                    String(
+                                        format: "%.0f מ״ל · %.0f×%.0f ס״מ · גובה %.1f",
+                                        item.volumeMl,
+                                        item.footprintLengthCm,
+                                        item.footprintWidthCm,
+                                        item.medianHeightCm
+                                    )
+                                )
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            }
+                        }
+
+                        if let quality = scanQuality {
+                            ScanQualityResultView(quality: quality)
+                        }
+                    } header: {
+                        Text("פריטים עם נפח (בלי צלחת/קערה)")
+                    }
+                }
+
+                if let heightDebugImage {
+                    Section {
+                        Image(uiImage: heightDebugImage)
+                            .resizable()
+                            .interpolation(.none)
+                            .scaledToFit()
+                            .frame(maxWidth: .infinity)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                    } header: {
+                        Text("תמונת גבהים")
+                    } footer: {
+                        Text("סולם צבעים מ־0 ס״מ עד גובה מקסימלי בסריקה. קו צהוב = מסיכת מזון.")
+                    }
+                }
+
+                if isRunningOnDeviceVision {
+                    Section {
                         HStack(spacing: 10) {
                             ProgressView()
-                            Text("מנתח תמונה…")
+                            Text("מנתח במכשיר (סיווג/סגמנטציה)…")
                                 .foregroundStyle(.secondary)
                         }
-                    } else if analysisItems.isEmpty {
-                        Button("נתח תזונה מהתמונה") {
-                            Task { await analyze() }
-                        }
-                        .disabled(selectedImage == nil || !ImageNutritionSettings.isConfigured)
-                    } else {
-                        Button(analysisItems.count > 1 ? "הוסף הכל ליומן" : "הוסף ליומן") {
-                            commitAdd()
-                        }
-                        .disabled(!canCommit)
-                        Button("נתח שוב", role: .destructive) {
-                            analysisItems = []
-                            Task { await analyze() }
-                        }
-                        .disabled(selectedImage == nil || isAnalyzing)
                     }
                 }
 
-                if !ImageNutritionSettings.isConfigured {
+                if let visionResult {
                     Section {
-                        Text("חסר מפתח OpenAI — הגדירו אותו במסך ההגדרות.")
+                        if visionResult.tableDetected || tableDetected {
+                            Label("זוהה שולחן/משטח", systemImage: "table.furniture")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        ForEach(visionResult.classifications.prefix(6)) { item in
+                            HStack {
+                                Text(item.identifier)
+                                Spacer()
+                                Text("\(Int((item.confidence * 100).rounded()))%")
+                                    .foregroundStyle(.secondary)
+                            }
                             .font(.caption)
-                            .foregroundStyle(.red)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                }
-
-                if let errorText {
-                    Section {
-                        Text(errorText)
-                            .foregroundStyle(.red)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .multilineTextAlignment(.leading)
+                        }
+                    } header: {
+                        Text("סיווג סצנה (Apple Vision)")
                     }
                 }
             }

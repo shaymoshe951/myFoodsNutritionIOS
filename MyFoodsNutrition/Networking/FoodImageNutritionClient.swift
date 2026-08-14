@@ -57,11 +57,11 @@ struct FoodImageNutritionClient {
             ],
         ]
         if modelOption.usesReasoningAPIConstraints {
-            // Faster, cheaper estimates; GPT-5.x typically rejects `temperature`.
             body["reasoning_effort"] = "low"
-        } else {
+        } else if modelOption.supportsCustomTemperature {
             body["temperature"] = 0.2
         }
+        // Else omit temperature (required for models that only allow the API default).
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"

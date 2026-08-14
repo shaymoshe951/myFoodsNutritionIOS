@@ -52,9 +52,20 @@ enum OpenAIVisionModelOption: String, CaseIterable, Identifiable {
         }
     }
 
-    /// GPT-5.x chat models often reject `temperature`; use `reasoning_effort` instead.
+    /// GPT-5.x chat models reject custom `temperature`; use `reasoning_effort` instead.
     var usesReasoningAPIConstraints: Bool {
         rawValue.hasPrefix("gpt-5")
+    }
+
+    /// Whether Chat Completions accepts a custom `temperature` for this model.
+    /// Prefer omitting temperature entirely for newer models.
+    var supportsCustomTemperature: Bool {
+        switch self {
+        case .gpt4o, .gpt4oMini:
+            return true
+        case .gpt41, .gpt41Mini, .gpt41Nano, .gpt56Sol, .gpt56Terra, .gpt56Luna:
+            return false
+        }
     }
 
     static var defaultOption: OpenAIVisionModelOption { .gpt4o }

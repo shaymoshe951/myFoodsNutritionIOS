@@ -12,6 +12,8 @@ struct FoodVolumeItem: Equatable, Identifiable {
     var footprintLengthCm: Double
     var footprintWidthCm: Double
     var medianHeightCm: Double
+    /// Number of depth pixels contributing to this item's volume.
+    var foodPixelCount: Int
 }
 
 enum FoodTablewareLexicon {
@@ -136,7 +138,8 @@ enum FoodItemVolumeSegmenter {
                             volumeMl: volume.volumeMl,
                             footprintLengthCm: volume.footprintLengthCm,
                             footprintWidthCm: volume.footprintWidthCm,
-                            medianHeightCm: volume.medianHeightCm
+                            medianHeightCm: volume.medianHeightCm,
+                            foodPixelCount: volume.foodPixelCount
                         )
                     )
                     for i in depthMask.indices {
@@ -200,7 +203,8 @@ enum FoodItemVolumeSegmenter {
             volumeMl: volume.volumeMl,
             footprintLengthCm: volume.footprintLengthCm,
             footprintWidthCm: volume.footprintWidthCm,
-            medianHeightCm: volume.medianHeightCm
+            medianHeightCm: volume.medianHeightCm,
+            foodPixelCount: volume.foodPixelCount
         )
         return Output(
             items: [item],

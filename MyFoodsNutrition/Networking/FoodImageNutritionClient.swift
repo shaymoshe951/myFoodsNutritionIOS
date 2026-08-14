@@ -1,6 +1,27 @@
 import Foundation
 import UIKit
 
+/// Optional on-device Vision / LiDAR hints appended to the AI user prompt.
+struct FoodImageOnDeviceHints: Equatable {
+    struct LabelHint: Equatable {
+        var id: String
+        var confidence: Float
+    }
+
+    var visionLabels: [LabelHint]
+    var tableDetected: Bool?
+    var volumeMl: Double?
+    var estimatedGramsFromVolume: Int?
+    var densityGPerMl: Double?
+
+    var isEmpty: Bool {
+        visionLabels.isEmpty
+            && tableDetected == nil
+            && volumeMl == nil
+            && estimatedGramsFromVolume == nil
+    }
+}
+
 /// Sends a food photo (+ optional prompt) to OpenAI vision and returns structured nutrition per 100 g.
 struct FoodImageNutritionClient {
     private let session: URLSession
@@ -14,6 +35,7 @@ struct FoodImageNutritionClient {
         optionalPrompt: String?,
         detailLevel: ImageNutritionDetailLevel,
         nutrientKeys: [String],
+        onDeviceHints: FoodImageOnDeviceHints? = nil,
         apiKey: String = ImageNutritionSettings.openAIAPIKey,
         model: String = ImageNutritionSettings.visionModel
     ) async throws -> FoodImageNutritionResult {
@@ -30,7 +52,12 @@ struct FoodImageNutritionClient {
 
         let base64 = jpegData.base64EncodedString()
         let dataURL = "data:image/jpeg;base64,\(base64)"
-        let userText = Self.userPrompt(optionalPrompt: optionalPrompt, detailLevel: detailLevel, nutrientKeys: keys)
+        let userText = Self.userPrompt(
+            optionalPrompt: optionalPrompt,
+            detailLevel: detailLevel,
+            nutrientKeys: keys,
+            onDeviceHints: onDeviceHints
+        )
         let modelOption = OpenAIVisionModelOption.fromStoredModelId(model)
 
         var body: [String: Any] = [
@@ -128,6 +155,8 @@ struct FoodImageNutritionClient {
       "notes": string (optional)
     }
     quantity_grams is the estimated edible portion in the photo (grams).
+    If on-device LiDAR volume / grams hints are provided, prefer those for quantity_grams (you may still refine slightly).
+    On-device Vision labels are weak hints only — trust the image more when they conflict.
     nutrients_per_100g values must use the exact nutrient keys requested by the user.
     energy is kcal per 100 g. macronutrients (protein, carbohydrate, total_lipid_fat, dietary_fiber) are grams per 100 g.
     Micronutrients use the same mass units as typical food composition tables for that key (mg/µg as appropriate for the key name); prefer numeric amounts per 100 g consistent with USDA-style tables.
@@ -137,7 +166,8 @@ struct FoodImageNutritionClient {
     private static func userPrompt(
         optionalPrompt: String?,
         detailLevel: ImageNutritionDetailLevel,
-        nutrientKeys: [String]
+        nutrientKeys: [String],
+        onDeviceHints: FoodImageOnDeviceHints?
     ) -> String {
         let keysList = nutrientKeys.joined(separator: ", ")
         var parts: [String] = [
@@ -148,6 +178,25 @@ struct FoodImageNutritionClient {
         let extra = optionalPrompt?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if !extra.isEmpty {
             parts.append("Additional user hint: \(extra)")
+        }
+        if let hints = onDeviceHints, !hints.isEmpty {
+            parts.append("On-device measurements/hints:")
+            if let v = hints.volumeMl {
+                parts.append("- measured_volume_ml: \(String(format: "%.1f", v))")
+            }
+            if let g = hints.estimatedGramsFromVolume {
+                parts.append("- estimated_grams_from_volume: \(g)")
+            }
+            if let d = hints.densityGPerMl {
+                parts.append("- assumed_density_g_per_ml: \(String(format: "%.2f", d))")
+            }
+            if let table = hints.tableDetected {
+                parts.append("- table_detected_by_vision: \(table)")
+            }
+            if !hints.visionLabels.isEmpty {
+                let labelText = hints.visionLabels.prefix(8).map { "\($0.id)(\(String(format: "%.2f", $0.confidence)))" }.joined(separator: ", ")
+                parts.append("- apple_vision_labels: \(labelText)")
+            }
         }
         return parts.joined(separator: "\n")
     }

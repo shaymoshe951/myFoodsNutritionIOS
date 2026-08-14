@@ -24,6 +24,7 @@ struct FoodImageAddSheet: View {
     @State private var visionResult: VisionFoodSceneAnalyzer.Result?
     @State private var volumeItems: [FoodVolumeItem] = []
     @State private var tableDetected = false
+    @State private var scanQuality: ScanQualityAnalyzer.CaptureQuality?
 
     private var detailLevel: ImageNutritionDetailLevel {
         ImageNutritionSettings.detailLevel
@@ -132,6 +133,11 @@ struct FoodImageAddSheet: View {
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                             }
+                        }
+                        
+                        // Scan quality indicator
+                        if let quality = scanQuality {
+                            ScanQualityResultView(quality: quality)
                         }
                     } header: {
                         Text("פריטים עם נפח (בלי צלחת/קערה)")
@@ -327,6 +333,7 @@ struct FoodImageAddSheet: View {
         if clearVolume {
             volumeItems = []
             tableDetected = false
+            scanQuality = nil
         }
         Task { await runOnDeviceVision(for: image) }
     }
@@ -339,6 +346,7 @@ struct FoodImageAddSheet: View {
         errorText = nil
         volumeItems = capture.items
         tableDetected = capture.tableDetected
+        scanQuality = capture.scanQuality
         visionResult = VisionFoodSceneAnalyzer.Result(
             classifications: capture.visionLabels,
             foregroundMask: nil,
@@ -455,6 +463,85 @@ struct FoodImageAddSheet: View {
             onConfirm(result)
         }
         dismiss()
+    }
+}
+
+// MARK: - Scan Quality Result View
+
+private struct ScanQualityResultView: View {
+    let quality: ScanQualityAnalyzer.CaptureQuality
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                // Reliability indicator
+                Circle()
+                    .fill(reliabilityColor)
+                    .frame(width: 10, height: 10)
+                
+                Text("איכות סריקה: \(reliabilityText)")
+                    .font(.caption)
+                    .fontWeight(.medium)
+                
+                Spacer()
+                
+                Text(String(format: "%.0f ס״מ", quality.medianDistanceCm))
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            
+            // Warning message if any
+            if let warning = quality.warningMessage {
+                HStack(spacing: 4) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                    Text(warning)
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                }
+            }
+            
+            // Quality details
+            HStack(spacing: 16) {
+                qualityMetric(label: "כיסוי עומק", value: String(format: "%.0f%%", quality.depthCoverage * 100))
+                qualityMetric(label: "איכות מישור", value: String(format: "%.0f%%", quality.planeFitQuality * 100))
+            }
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 4)
+    }
+    
+    private var reliabilityColor: Color {
+        if quality.reliabilityScore >= 0.7 {
+            return .green
+        } else if quality.reliabilityScore >= 0.4 {
+            return .yellow
+        } else {
+            return .red
+        }
+    }
+    
+    private var reliabilityText: String {
+        if quality.reliabilityScore >= 0.8 {
+            return "מצוינת"
+        } else if quality.reliabilityScore >= 0.6 {
+            return "טובה"
+        } else if quality.reliabilityScore >= 0.4 {
+            return "בינונית"
+        } else {
+            return "חלשה"
+        }
+    }
+    
+    @ViewBuilder
+    private func qualityMetric(label: String, value: String) -> some View {
+        HStack(spacing: 4) {
+            Text(label + ":")
+            Text(value)
+                .fontWeight(.medium)
+        }
     }
 }
 

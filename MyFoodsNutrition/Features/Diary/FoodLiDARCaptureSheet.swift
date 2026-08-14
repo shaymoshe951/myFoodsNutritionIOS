@@ -10,7 +10,6 @@ struct FoodDepthCaptureResult: Equatable {
     var tableDetected: Bool
 
     var totalVolumeMl: Double { items.reduce(0) { $0 + $1.volumeMl } }
-    var totalEstimatedGrams: Int { items.reduce(0) { $0 + $1.estimatedGrams } }
 }
 
 /// Captures one LiDAR scene-depth frame, segments food with Vision, estimates volume above the table plane.
@@ -110,7 +109,9 @@ private struct FoodARSCNView: UIViewRepresentable {
         init(model: FoodLiDARCaptureModel) { self.model = model }
 
         func renderer(_ renderer: SCNSceneRenderer, updateAtTime time: TimeInterval) {
-            guard let frame = model.session?.currentFrame else { return }
+            guard let sceneView = renderer as? ARSCNView,
+                  let frame = sceneView.session.currentFrame
+            else { return }
             Task { @MainActor in
                 model.handle(frame: frame)
             }

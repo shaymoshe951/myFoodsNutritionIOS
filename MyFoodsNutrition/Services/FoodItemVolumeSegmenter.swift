@@ -9,8 +9,6 @@ struct FoodVolumeItem: Equatable, Identifiable {
     var label: String
     var labelConfidence: Float
     var volumeMl: Double
-    var estimatedGrams: Int
-    var densityGPerMl: Double
     var footprintLengthCm: Double
     var footprintWidthCm: Double
     var medianHeightCm: Double
@@ -129,8 +127,6 @@ enum FoodItemVolumeSegmenter {
                         maskThreshold: 0.35,
                         minHeightMeters: 0.008
                     )
-                    let density = VisionFoodSceneAnalyzer.suggestedDensityGPerMl(from: labels)
-                    let grams = max(1, Int((volume.volumeMl * density).rounded()))
                     let conf = top?.confidence ?? 0
                     items.append(
                         FoodVolumeItem(
@@ -138,8 +134,6 @@ enum FoodItemVolumeSegmenter {
                             label: Self.preferredFoodLabel(labels),
                             labelConfidence: conf,
                             volumeMl: volume.volumeMl,
-                            estimatedGrams: grams,
-                            densityGPerMl: density,
                             footprintLengthCm: volume.footprintLengthCm,
                             footprintWidthCm: volume.footprintWidthCm,
                             medianHeightCm: volume.medianHeightCm
@@ -199,15 +193,11 @@ enum FoodItemVolumeSegmenter {
             mask01: nil,
             minHeightMeters: 0.008
         )
-        let density = VisionFoodSceneAnalyzer.suggestedDensityGPerMl(from: sceneLabels)
-        let grams = max(1, Int((volume.volumeMl * density).rounded()))
         let item = FoodVolumeItem(
             id: "scene-0",
             label: preferredFoodLabel(sceneLabels),
             labelConfidence: sceneLabels.first?.confidence ?? 0,
             volumeMl: volume.volumeMl,
-            estimatedGrams: grams,
-            densityGPerMl: density,
             footprintLengthCm: volume.footprintLengthCm,
             footprintWidthCm: volume.footprintWidthCm,
             medianHeightCm: volume.medianHeightCm

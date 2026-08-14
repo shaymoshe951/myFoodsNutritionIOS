@@ -12,8 +12,6 @@ struct FoodImageOnDeviceHints: Equatable {
         var label: String
         var confidence: Float
         var volumeMl: Double
-        var estimatedGrams: Int
-        var densityGPerMl: Double
     }
 
     var visionLabels: [LabelHint]
@@ -22,15 +20,12 @@ struct FoodImageOnDeviceHints: Equatable {
     var volumeItems: [VolumeItemHint]
     /// Legacy single-blob fields (sum / first item) for older UI paths.
     var volumeMl: Double?
-    var estimatedGramsFromVolume: Int?
-    var densityGPerMl: Double?
 
     var isEmpty: Bool {
         visionLabels.isEmpty
             && tableDetected == nil
             && volumeItems.isEmpty
             && volumeMl == nil
-            && estimatedGramsFromVolume == nil
     }
 
     static func fromVolumeSegmentation(_ output: FoodItemVolumeSegmenter.Output) -> FoodImageOnDeviceHints {
@@ -41,20 +36,15 @@ struct FoodImageOnDeviceHints: Equatable {
             VolumeItemHint(
                 label: $0.label,
                 confidence: $0.labelConfidence,
-                volumeMl: $0.volumeMl,
-                estimatedGrams: $0.estimatedGrams,
-                densityGPerMl: $0.densityGPerMl
+                volumeMl: $0.volumeMl
             )
         }
         let totalMl = output.items.reduce(0.0) { $0 + $1.volumeMl }
-        let totalG = output.items.reduce(0) { $0 + $1.estimatedGrams }
         return FoodImageOnDeviceHints(
             visionLabels: labels,
             tableDetected: output.tableDetected,
             volumeItems: items,
-            volumeMl: totalMl > 0 ? totalMl : nil,
-            estimatedGramsFromVolume: totalG > 0 ? totalG : nil,
-            densityGPerMl: output.items.first?.densityGPerMl
+            volumeMl: totalMl > 0 ? totalMl : nil
         )
     }
 }
@@ -193,11 +183,12 @@ struct FoodImageNutritionClient {
           "nutrients_per_100g": { "<nutrient_key>": number, ... },
           "notes": string (optional),
           "source_label": string (optional on-device label),
-          "volume_ml": number (optional on-device volume)
+          "volume_ml": number (optional echo of on-device volume)
         }
       ]
     }
-    If on-device volume_items are provided, return one output item per volume_item (same order), using measured volume/grams for quantity_grams (you may refine slightly), and improve the food name from the image.
+    quantity_grams is the edible portion weight in grams for that item.
+    If on-device volume_items are provided, return one output item per volume_item (same order). Use each measured volume_ml together with the image (and food type) to estimate quantity_grams yourself — do not assume a fixed density from the app. Echo volume_ml and improve the food name from the image.
     If only a single food is present, still return an "items" array with one element.
     nutrients_per_100g must use the exact nutrient keys requested by the user.
     energy is kcal per 100 g. macronutrients (protein, carbohydrate, total_lipid_fat, dietary_fiber) are grams per 100 g.
@@ -216,6 +207,7 @@ struct FoodImageNutritionClient {
             "Estimate nutrition for edible food in this image (exclude plate/bowl/utensils).",
             "Detail level: \(detailLevel.rawValue).",
             "Include nutrients_per_100g for exactly these keys: \(keysList).",
+            "Estimate quantity_grams for each item from the image; when volume_ml is provided per label, use that measured volume to inform your weight estimate.",
         ]
         let extra = optionalPrompt?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if !extra.isEmpty {
@@ -230,19 +222,11 @@ struct FoodImageNutritionClient {
                 parts.append("- volume_items (plate/bowl already excluded when possible):")
                 for (i, it) in hints.volumeItems.enumerated() {
                     parts.append(
-                        "  \(i + 1). label=\(it.label) conf=\(String(format: "%.2f", it.confidence)) volume_ml=\(String(format: "%.1f", it.volumeMl)) estimated_grams=\(it.estimatedGrams) density_g_per_ml=\(String(format: "%.2f", it.densityGPerMl))"
+                        "  \(i + 1). label=\(it.label) conf=\(String(format: "%.2f", it.confidence)) volume_ml=\(String(format: "%.1f", it.volumeMl))"
                     )
                 }
-            } else {
-                if let v = hints.volumeMl {
-                    parts.append("- measured_volume_ml: \(String(format: "%.1f", v))")
-                }
-                if let g = hints.estimatedGramsFromVolume {
-                    parts.append("- estimated_grams_from_volume: \(g)")
-                }
-                if let d = hints.densityGPerMl {
-                    parts.append("- assumed_density_g_per_ml: \(String(format: "%.2f", d))")
-                }
+            } else if let v = hints.volumeMl {
+                parts.append("- measured_volume_ml: \(String(format: "%.1f", v))")
             }
             if !hints.visionLabels.isEmpty {
                 let labelText = hints.visionLabels.prefix(8).map { "\($0.id)(\(String(format: "%.2f", $0.confidence)))" }.joined(separator: ", ")

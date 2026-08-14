@@ -4,6 +4,7 @@ import Foundation
 struct FoodImageNutritionResult: Equatable, Identifiable {
     var id: String { "\(itemName)-\(quantityGrams)-\(nutrientsPer100g.count)" }
     var itemName: String
+    /// Portion weight from the AI (editable before adding to the diary).
     var quantityGrams: Int
     /// Nutrient key → amount per 100 g (same keys as `food_catalog_item.nutrients_json`).
     var nutrientsPer100g: [String: Double]

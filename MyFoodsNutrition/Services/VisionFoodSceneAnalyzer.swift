@@ -19,11 +19,11 @@ enum VisionFoodSceneAnalyzer {
         var imageHeight: Int
 
         var topFoodLikeLabels: [Classification] {
-            classifications.filter { Self.isFoodLike($0.identifier) }
+            classifications.filter { VisionFoodSceneAnalyzer.isFoodLike($0.identifier) }
         }
 
         var tableDetected: Bool {
-            classifications.contains { Self.isTableLike($0.identifier) && $0.confidence >= 0.15 }
+            classifications.contains { VisionFoodSceneAnalyzer.isTableLike($0.identifier) && $0.confidence >= 0.15 }
         }
 
         var suggestedFoodNameEn: String? {
@@ -76,30 +76,6 @@ enum VisionFoodSceneAnalyzer {
     static func isTableLike(_ id: String) -> Bool {
         let s = id.lowercased()
         return s.contains("table") || s == "desk" || s.contains("countertop") || s.contains("dining")
-    }
-
-    /// Rough edible density (g/ml) from Vision labels — used only with measured volume.
-    static func suggestedDensityGPerMl(from classifications: [Classification]) -> Double {
-        let ids = classifications.map { $0.identifier.lowercased() }
-        if ids.contains(where: { $0.contains("bread") || $0.contains("loaf") || $0.contains("bagel") || $0.contains("toast") }) {
-            return 0.30
-        }
-        if ids.contains(where: { $0.contains("cake") || $0.contains("cookie") || $0.contains("dessert") }) {
-            return 0.45
-        }
-        if ids.contains(where: { $0.contains("meat") || $0.contains("chicken") || $0.contains("beef") || $0.contains("steak") || $0.contains("fish") }) {
-            return 0.95
-        }
-        if ids.contains(where: { $0.contains("soup") || $0.contains("yogurt") || $0.contains("drink") || $0.contains("juice") }) {
-            return 1.00
-        }
-        if ids.contains(where: { $0.contains("salad") || $0.contains("vegetable") || $0.contains("fruit") }) {
-            return 0.55
-        }
-        if ids.contains(where: { $0.contains("rice") || $0.contains("pasta") || $0.contains("noodle") || $0.contains("potato") }) {
-            return 0.70
-        }
-        return 0.60
     }
 
     private static func softMask(

@@ -121,9 +121,8 @@ struct FoodImageAddSheet: View {
                                     .font(.subheadline.weight(.semibold))
                                 Text(
                                     String(
-                                        format: "%.0f מ״ל · %d ג׳ · %.0f×%.0f ס״מ · גובה %.1f",
+                                        format: "%.0f מ״ל · %.0f×%.0f ס״מ · גובה %.1f",
                                         item.volumeMl,
-                                        item.estimatedGrams,
                                         item.footprintLengthCm,
                                         item.footprintWidthCm,
                                         item.medianHeightCm
@@ -157,10 +156,17 @@ struct FoodImageAddSheet: View {
                                 TextField("כמות בגרם", text: editGramsBinding(idx))
                                     .keyboardType(.numberPad)
                                     .multilineTextAlignment(.leading)
-                                if let vol = item.volumeMl {
-                                    Text(String(format: "נפח במכשיר: %.0f מ״ל", vol))
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
+                                if item.volumeMl != nil || item.sourceLabel != nil {
+                                    HStack(spacing: 6) {
+                                        if let label = item.sourceLabel, !label.isEmpty {
+                                            Text("תווית: \(label)")
+                                        }
+                                        if let vol = item.volumeMl {
+                                            Text(String(format: "נפח RGB+D: %.0f מ״ל", vol))
+                                        }
+                                    }
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
                                 }
                                 nutrientPreview(item.nutrientsPer100g)
                                 if let notes = item.notes, !notes.isEmpty {
@@ -345,12 +351,6 @@ struct FoodImageAddSheet: View {
             imageWidth: Int(capture.colorImage.size.width),
             imageHeight: Int(capture.colorImage.size.height)
         )
-        if optionalPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            let summary = capture.items.map {
-                "\($0.label)~\(Int($0.volumeMl.rounded()))ml/\($0.estimatedGrams)g"
-            }.joined(separator: "; ")
-            optionalPrompt = "On-device items: \(summary)"
-        }
     }
 
     private func runOnDeviceVision(for image: UIImage) async {
@@ -402,9 +402,7 @@ struct FoodImageAddSheet: View {
             visionLabels: labels,
             tableDetected: visionResult?.tableDetected,
             volumeItems: [],
-            volumeMl: nil,
-            estimatedGramsFromVolume: nil,
-            densityGPerMl: nil
+            volumeMl: nil
         )
         return hints.isEmpty ? nil : hints
     }
@@ -430,15 +428,26 @@ struct FoodImageAddSheet: View {
                 nutrientKeys: nutrientKeysForDetail,
                 onDeviceHints: makeOnDeviceHints()
             )
-            analysisItems = results
-            editNames = results.map(\.itemName)
-            if !volumeItems.isEmpty, volumeItems.count == results.count {
-                editGrams = volumeItems.map { String($0.estimatedGrams) }
-            } else {
-                editGrams = results.map { String($0.quantityGrams) }
-            }
+            let merged = Self.mergeVolumeEstimations(into: results, volumeItems: volumeItems)
+            analysisItems = merged
+            editNames = merged.map(\.itemName)
+            editGrams = merged.map { String($0.quantityGrams) }
         } catch {
             errorText = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    /// Attaches RGB+D per-label volume onto analysis rows when counts match on-device items.
+    private static func mergeVolumeEstimations(
+        into results: [FoodImageNutritionResult],
+        volumeItems: [FoodVolumeItem]
+    ) -> [FoodImageNutritionResult] {
+        guard !volumeItems.isEmpty, volumeItems.count == results.count else { return results }
+        return zip(results, volumeItems).map { result, volume in
+            var updated = result
+            updated.sourceLabel = volume.label
+            updated.volumeMl = volume.volumeMl
+            return updated
         }
     }
 
@@ -448,10 +457,6 @@ struct FoodImageAddSheet: View {
             var result = analysisItems[i]
             result.itemName = editNames[i].trimmingCharacters(in: .whitespacesAndNewlines)
             result.quantityGrams = Int(editGrams[i]) ?? result.quantityGrams
-            if volumeItems.indices.contains(i) {
-                result.sourceLabel = volumeItems[i].label
-                result.volumeMl = volumeItems[i].volumeMl
-            }
             onConfirm(result)
         }
         dismiss()

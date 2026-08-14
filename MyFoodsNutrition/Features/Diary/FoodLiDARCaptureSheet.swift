@@ -8,6 +8,8 @@ struct FoodDepthCaptureResult: Equatable {
     var items: [FoodVolumeItem]
     var visionLabels: [VisionFoodSceneAnalyzer.Classification]
     var tableDetected: Bool
+    /// Scan quality assessment - nil if not computed.
+    var scanQuality: ScanQualityAnalyzer.CaptureQuality?
 
     var totalVolumeMl: Double { items.reduce(0) { $0 + $1.volumeMl } }
     var totalEstimatedGrams: Int { items.reduce(0) { $0 + $1.estimatedGrams } }
@@ -29,6 +31,13 @@ struct FoodLiDARCaptureSheet: View {
                     .ignoresSafeArea()
 
                 VStack {
+                    // Live scan quality indicator at top
+                    if let quality = model.liveQuality {
+                        ScanQualityIndicatorView(metrics: quality)
+                            .padding(.top, 60)
+                            .padding(.horizontal)
+                    }
+                    
                     Spacer()
                     Text("כוונו מעל המזון על שולחן שטוח. צלחת/קערה יוסרו כשאפשר; כמה פריטים → נפח לכל אחד.")
                         .font(.footnote)
@@ -59,7 +68,7 @@ struct FoodLiDARCaptureSheet: View {
                         }
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(isProcessing || !model.isReady)
+                    .disabled(isProcessing || !model.isReady || !isScanQualityAcceptable)
                     .padding(.bottom, 28)
                 }
             }
@@ -72,6 +81,11 @@ struct FoodLiDARCaptureSheet: View {
             }
         }
     }
+    
+    private var isScanQualityAcceptable: Bool {
+        guard let quality = model.liveQuality else { return true }
+        return quality.indicatorColor != .red
+    }
 
     private func capture() async {
         isProcessing = true
@@ -83,6 +97,96 @@ struct FoodLiDARCaptureSheet: View {
             dismiss()
         } catch {
             errorText = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+}
+
+// MARK: - Scan Quality Indicator
+
+private struct ScanQualityIndicatorView: View {
+    let metrics: ScanQualityAnalyzer.LiveMetrics
+    
+    var body: some View {
+        VStack(spacing: 8) {
+            // Distance and guidance
+            HStack(spacing: 12) {
+                // Color indicator circle
+                Circle()
+                    .fill(indicatorColor)
+                    .frame(width: 16, height: 16)
+                    .shadow(color: indicatorColor.opacity(0.5), radius: 4)
+                
+                VStack(alignment: .leading, spacing: 2) {
+                    // Distance display
+                    if metrics.medianDistanceM > 0 {
+                        Text(distanceText)
+                            .font(.subheadline.monospacedDigit())
+                            .fontWeight(.medium)
+                    }
+                    
+                    // Guidance message
+                    if let message = metrics.guidanceMessage {
+                        Text(message)
+                            .font(.caption)
+                            .foregroundStyle(guidanceTextColor)
+                    }
+                }
+                
+                Spacer()
+                
+                // Reliability score bar
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text("איכות")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            RoundedRectangle(cornerRadius: 3)
+                                .fill(Color.secondary.opacity(0.3))
+                            
+                            RoundedRectangle(cornerRadius: 3)
+                                .fill(reliabilityBarColor)
+                                .frame(width: geo.size.width * CGFloat(metrics.reliabilityScore))
+                        }
+                    }
+                    .frame(width: 60, height: 6)
+                }
+            }
+        }
+        .padding(12)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .animation(.easeInOut(duration: 0.2), value: metrics.indicatorColor)
+    }
+    
+    private var distanceText: String {
+        let cm = Int(metrics.medianDistanceM * 100)
+        return "\(cm) ס״מ"
+    }
+    
+    private var indicatorColor: Color {
+        switch metrics.indicatorColor {
+        case .green: return .green
+        case .yellow: return .yellow
+        case .red: return .red
+        }
+    }
+    
+    private var guidanceTextColor: Color {
+        switch metrics.indicatorColor {
+        case .green: return .secondary
+        case .yellow: return .orange
+        case .red: return .red
+        }
+    }
+    
+    private var reliabilityBarColor: Color {
+        if metrics.reliabilityScore >= 0.7 {
+            return .green
+        } else if metrics.reliabilityScore >= 0.4 {
+            return .yellow
+        } else {
+            return .red
         }
     }
 }
@@ -123,9 +227,12 @@ private struct FoodARSCNView: UIViewRepresentable {
 @MainActor
 final class FoodLiDARCaptureModel: ObservableObject {
     @Published private(set) var isReady = false
+    @Published private(set) var liveQuality: ScanQualityAnalyzer.LiveMetrics?
 
     private(set) weak var session: ARSession?
     private var latestFrame: ARFrame?
+    private var lastQualityUpdate: Date = .distantPast
+    private let qualityUpdateInterval: TimeInterval = 0.15
 
     static var isLiDARSupported: Bool {
         ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth)
@@ -145,6 +252,26 @@ final class FoodLiDARCaptureModel: ObservableObject {
     func handle(frame: ARFrame) {
         latestFrame = frame
         isReady = frame.sceneDepth != nil
+        
+        // Update live quality metrics at throttled rate
+        let now = Date()
+        if now.timeIntervalSince(lastQualityUpdate) >= qualityUpdateInterval,
+           let sceneDepth = frame.sceneDepth {
+            lastQualityUpdate = now
+            updateLiveQuality(depthBuffer: sceneDepth.depthMap)
+        }
+    }
+    
+    private func updateLiveQuality(depthBuffer: CVPixelBuffer) {
+        let depthW = CVPixelBufferGetWidth(depthBuffer)
+        let depthH = CVPixelBufferGetHeight(depthBuffer)
+        let depth = Self.floatDepthMeters(from: depthBuffer)
+        
+        liveQuality = ScanQualityAnalyzer.analyzeLive(
+            depthMeters: depth,
+            width: depthW,
+            height: depthH
+        )
     }
 
     func captureFoodVolume() async throws -> FoodDepthCaptureResult {
@@ -181,12 +308,23 @@ final class FoodLiDARCaptureModel: ObservableObject {
         guard !segmented.items.isEmpty else {
             throw FoodVolumeEstimator.EstimateError.noFoodPixels
         }
+        
+        // Compute scan quality assessment
+        let totalFoodPixels = segmented.items.reduce(0) { $0 + $1.foodPixelCount }
+        let scanQuality = ScanQualityAnalyzer.analyzeCapture(
+            depthMeters: depth,
+            width: depthW,
+            height: depthH,
+            intrinsics: K,
+            foodPixelCount: totalFoodPixels
+        )
 
         return FoodDepthCaptureResult(
             colorImage: colorImage,
             items: segmented.items,
             visionLabels: segmented.sceneClassifications,
-            tableDetected: segmented.tableDetected
+            tableDetected: segmented.tableDetected,
+            scanQuality: scanQuality
         )
     }
 

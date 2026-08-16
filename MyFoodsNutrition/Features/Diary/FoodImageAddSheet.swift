@@ -203,6 +203,11 @@ struct FoodImageAddSheet: View {
                                 )
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
+                                if item.touchesImageBorder {
+                                    Text("נוגע במסגרת התמונה (ייתכן קיר/מכסה קופסה)")
+                                        .font(.caption2)
+                                        .foregroundStyle(.orange)
+                                }
                             }
                         }
 
@@ -210,7 +215,7 @@ struct FoodImageAddSheet: View {
                             ScanQualityResultView(quality: quality)
                         }
                     } header: {
-                        Text("פריטים עם נפח (בלי צלחת/קערה)")
+                        Text("מועמדי נפח (ה־AI יבחר מזון)")
                     }
                 }
 
@@ -440,6 +445,7 @@ struct FoodImageAddSheet: View {
                 sceneClassifications: visionResult?.classifications ?? [],
                 tableDetected: tableDetected,
                 combinedFoodMask01: nil,
+                islandLabelMap: nil,
                 depthWidth: 0,
                 depthHeight: 0
             )
@@ -494,16 +500,23 @@ struct FoodImageAddSheet: View {
         }
     }
 
-    /// Attaches RGB+D per-label volume onto analysis rows when counts match on-device items.
+    /// Attaches the matching on-device island onto analysis rows by echoed volume_ml.
     private static func mergeVolumeEstimations(
         into results: [FoodImageNutritionResult],
         volumeItems: [FoodVolumeItem]
     ) -> [FoodImageNutritionResult] {
-        guard !volumeItems.isEmpty, volumeItems.count == results.count else { return results }
-        return zip(results, volumeItems).map { result, volume in
+        guard !volumeItems.isEmpty else { return results }
+        var remaining = volumeItems
+        return results.map { result in
             var updated = result
-            updated.sourceLabel = volume.label
-            updated.volumeMl = volume.volumeMl
+            guard let vm = result.volumeMl, !remaining.isEmpty else { return updated }
+            let best = remaining.enumerated().min { a, b in
+                abs(a.element.volumeMl - vm) < abs(b.element.volumeMl - vm)
+            }
+            guard let best, abs(best.element.volumeMl - vm) < 1.0 else { return updated }
+            let vol = remaining.remove(at: best.offset)
+            updated.sourceLabel = vol.label
+            updated.volumeMl = vol.volumeMl
             return updated
         }
     }

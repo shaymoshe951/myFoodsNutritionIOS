@@ -3,7 +3,7 @@ import Foundation
 import UIKit
 import Vision
 
-/// One edible region after dropping plate/bowl/tableware, with measured volume.
+/// One height island after dropping plate/bowl/tableware instances, with measured volume.
 struct FoodVolumeItem: Equatable, Identifiable {
     var id: String
     var label: String
@@ -14,6 +14,8 @@ struct FoodVolumeItem: Equatable, Identifiable {
     var medianHeightCm: Double
     /// Number of depth pixels contributing to this item's volume.
     var foodPixelCount: Int
+    /// True if the island touches the depth-map border (often a box wall / lid, not food).
+    var touchesImageBorder: Bool
 }
 
 enum FoodTablewareLexicon {
@@ -31,7 +33,7 @@ enum FoodTablewareLexicon {
     }
 }
 
-/// Splits a LiDAR frame into labeled food volumes: instance masks → classify → drop tableware → height+volume.
+/// Splits a LiDAR frame into labeled height-island volumes: instance masks → classify → drop tableware → islands.
 enum FoodItemVolumeSegmenter {
 
     struct Output: Equatable {
@@ -40,6 +42,8 @@ enum FoodItemVolumeSegmenter {
         var tableDetected: Bool
         /// Union soft mask of kept food instances (depth resolution), for debugging/UI.
         var combinedFoodMask01: [Float]?
+        /// 0 = none; 1...items.count maps to `items[i-1]` (depth resolution).
+        var islandLabelMap: [UInt8]?
         var depthWidth: Int
         var depthHeight: Int
     }
@@ -85,7 +89,7 @@ enum FoodItemVolumeSegmenter {
             }
 
             let instances = obs.allInstances
-            var items: [FoodVolumeItem] = []
+            var pending: [(item: FoodVolumeItem, pixels: [Int])] = []
             var combined = Array(repeating: Float(0), count: depthWidth * depthHeight)
 
             if instances.isEmpty {
@@ -123,7 +127,7 @@ enum FoodItemVolumeSegmenter {
                 }
 
                 do {
-                    let volume = try FoodVolumeEstimator.estimateVolume(
+                    let islands = try FoodVolumeEstimator.estimateVolumeIslands(
                         depthMeters: depthMeters,
                         width: depthWidth,
                         height: depthHeight,
@@ -133,18 +137,26 @@ enum FoodItemVolumeSegmenter {
                         minHeightMeters: 0.008
                     )
                     let conf = top?.confidence ?? 0
-                    items.append(
-                        FoodVolumeItem(
-                            id: "inst-\(idx)",
-                            label: Self.preferredFoodLabel(labels),
-                            labelConfidence: conf,
-                            volumeMl: volume.volumeMl,
-                            footprintLengthCm: volume.footprintLengthCm,
-                            footprintWidthCm: volume.footprintWidthCm,
-                            medianHeightCm: volume.medianHeightCm,
-                            foodPixelCount: volume.foodPixelCount
+                    let label = Self.preferredFoodLabel(labels)
+                    for (islandIdx, island) in islands.enumerated() {
+                        let volume = island.result
+                        pending.append(
+                            (
+                                FoodVolumeItem(
+                                    id: "inst-\(idx)-island-\(islandIdx)",
+                                    label: label,
+                                    labelConfidence: conf,
+                                    volumeMl: volume.volumeMl,
+                                    footprintLengthCm: volume.footprintLengthCm,
+                                    footprintWidthCm: volume.footprintWidthCm,
+                                    medianHeightCm: volume.medianHeightCm,
+                                    foodPixelCount: volume.foodPixelCount,
+                                    touchesImageBorder: volume.touchesImageBorder
+                                ),
+                                island.pixelIndices
+                            )
                         )
-                    )
+                    }
                     for i in depthMask.indices {
                         combined[i] = max(combined[i], depthMask[i])
                     }
@@ -153,8 +165,8 @@ enum FoodItemVolumeSegmenter {
                 }
             }
 
-            // Merge tiny fragments with same label if needed later; for now keep separate.
-            items.sort { $0.volumeMl > $1.volumeMl }
+            pending.sort { $0.item.volumeMl > $1.item.volumeMl }
+            let items = pending.map(\.item)
 
             if items.isEmpty {
                 return try Self.singleBlobFallback(
@@ -167,11 +179,20 @@ enum FoodItemVolumeSegmenter {
                 )
             }
 
+            var islandLabelMap = [UInt8](repeating: 0, count: depthWidth * depthHeight)
+            for (idx, pair) in pending.enumerated() {
+                let label = UInt8(min(idx + 1, 255))
+                for p in pair.pixels where p >= 0 && p < islandLabelMap.count {
+                    islandLabelMap[p] = label
+                }
+            }
+
             return Output(
                 items: items,
                 sceneClassifications: sceneLabels,
                 tableDetected: tableDetected,
                 combinedFoodMask01: combined,
+                islandLabelMap: islandLabelMap,
                 depthWidth: depthWidth,
                 depthHeight: depthHeight
             )
@@ -191,7 +212,7 @@ enum FoodItemVolumeSegmenter {
         if let top = sceneLabels.first, FoodTablewareLexicon.isNonFood(top.identifier) {
             throw FoodVolumeEstimator.EstimateError.noFoodPixels
         }
-        let volume = try FoodVolumeEstimator.estimateVolume(
+        let volumes = try FoodVolumeEstimator.estimateVolumeIslands(
             depthMeters: depthMeters,
             width: depthWidth,
             height: depthHeight,
@@ -199,6 +220,10 @@ enum FoodItemVolumeSegmenter {
             mask01: nil,
             minHeightMeters: 0.008
         )
+        guard let volumeIsland = volumes.first else {
+            throw FoodVolumeEstimator.EstimateError.noFoodPixels
+        }
+        let volume = volumeIsland.result
         let item = FoodVolumeItem(
             id: "scene-0",
             label: preferredFoodLabel(sceneLabels),
@@ -207,13 +232,19 @@ enum FoodItemVolumeSegmenter {
             footprintLengthCm: volume.footprintLengthCm,
             footprintWidthCm: volume.footprintWidthCm,
             medianHeightCm: volume.medianHeightCm,
-            foodPixelCount: volume.foodPixelCount
+            foodPixelCount: volume.foodPixelCount,
+            touchesImageBorder: volume.touchesImageBorder
         )
+        var islandLabelMap = [UInt8](repeating: 0, count: depthWidth * depthHeight)
+        for p in volumeIsland.pixelIndices where p >= 0 && p < islandLabelMap.count {
+            islandLabelMap[p] = 1
+        }
         return Output(
             items: [item],
             sceneClassifications: sceneLabels,
             tableDetected: tableDetected,
             combinedFoodMask01: nil,
+            islandLabelMap: islandLabelMap,
             depthWidth: depthWidth,
             depthHeight: depthHeight
         )

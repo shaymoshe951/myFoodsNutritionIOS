@@ -32,50 +32,63 @@ struct FoodLiDARCaptureSheet: View {
         NavigationStack {
             ZStack {
                 FoodARSCNView(model: model)
-                    .ignoresSafeArea()
-
-                VStack {
-                    // Live scan quality indicator at top
-                    if let quality = model.liveQuality {
-                        ScanQualityIndicatorView(metrics: quality)
-                            .padding(.top, 60)
-                            .padding(.horizontal)
-                    }
-                    
-                    Spacer()
-                    Text("כוונו מעל המזון על שולחן שטוח. צלחת/קערה יוסרו כשאפשר; כמה פריטים → נפח לכל אחד.")
-                        .font(.footnote)
-                        .multilineTextAlignment(.center)
-                        .padding(10)
-                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
-                        .padding()
-
-                    if let errorText {
-                        Text(errorText)
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                            .padding(.horizontal)
-                    }
-
-                    Button {
-                        Task { await capture() }
-                    } label: {
-                        if isProcessing {
-                            ProgressView()
-                                .padding(.horizontal, 24)
-                                .padding(.vertical, 12)
-                        } else {
-                            Label("צלם נפח", systemImage: "cube.transparent")
-                                .font(.headline)
-                                .padding(.horizontal, 24)
-                                .padding(.vertical, 12)
-                        }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(isProcessing || !model.isReady || !isScanQualityAcceptable)
-                    .padding(.bottom, 28)
+                if let overlay = model.liveOverlay {
+                    Image(uiImage: overlay)
+                        .resizable()
+                        .interpolation(.none)
+                        .scaledToFill()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .clipped()
+                        .allowsHitTesting(false)
                 }
             }
+            .ignoresSafeArea()
+            .safeAreaInset(edge: .top, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        if let quality = model.liveQuality {
+                            ScanQualityIndicatorView(metrics: quality)
+                        }
+                        LiveVolumeSidebar(items: model.liveVolumeItems)
+                    }
+                    .padding(.horizontal, 12)
+                }
+                .safeAreaInset(edge: .bottom, spacing: 8) {
+                    VStack(spacing: 10) {
+                        Text("כוונו מעל המזון על שולחן שטוח. נפחים נמדדים לפי איי גובה; ה־AI ישאיר רק מזון (בלי קופסה/צלחת).")
+                            .font(.footnote)
+                            .foregroundStyle(.white)
+                            .multilineTextAlignment(.center)
+                            .padding(10)
+                            .frame(maxWidth: .infinity)
+                            .background(Color.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 10))
+
+                        if let errorText {
+                            Text(errorText)
+                                .font(.caption)
+                                .foregroundStyle(.red)
+                                .padding(.horizontal)
+                        }
+
+                        Button {
+                            Task { await capture() }
+                        } label: {
+                            if isProcessing {
+                                ProgressView()
+                                    .padding(.horizontal, 24)
+                                    .padding(.vertical, 12)
+                            } else {
+                                Label("צלם נפח", systemImage: "cube.transparent")
+                                    .font(.headline)
+                                    .padding(.horizontal, 24)
+                                    .padding(.vertical, 12)
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(isProcessing || !model.isReady)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 16)
+                }
             .navigationTitle("סריקת נפח (LiDAR)")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -84,11 +97,6 @@ struct FoodLiDARCaptureSheet: View {
                 }
             }
         }
-    }
-    
-    private var isScanQualityAcceptable: Bool {
-        guard let quality = model.liveQuality else { return true }
-        return quality.indicatorColor != .red
     }
 
     private func capture() async {
@@ -142,24 +150,24 @@ private struct ScanQualityIndicatorView: View {
                 VStack(alignment: .trailing, spacing: 2) {
                     Text("איכות")
                         .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.white.opacity(0.8))
                     
-                    GeometryReader { geo in
-                        ZStack(alignment: .leading) {
-                            RoundedRectangle(cornerRadius: 3)
-                                .fill(Color.secondary.opacity(0.3))
-                            
-                            RoundedRectangle(cornerRadius: 3)
-                                .fill(reliabilityBarColor)
-                                .frame(width: geo.size.width * CGFloat(metrics.reliabilityScore))
-                        }
+                    ZStack(alignment: .leading) {
+                        Capsule()
+                            .fill(Color.white.opacity(0.25))
+                        Capsule()
+                            .fill(reliabilityBarColor)
+                            .frame(width: 60 * CGFloat(max(0, min(1, metrics.reliabilityScore))))
                     }
-                    .frame(width: 60, height: 6)
+                    .frame(width: 60, height: 6, alignment: .leading)
+                    .clipped()
                 }
             }
         }
         .padding(12)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.black.opacity(0.58), in: RoundedRectangle(cornerRadius: 12))
+        .foregroundStyle(.white)
         .animation(.easeInOut(duration: 0.2), value: metrics.indicatorColor)
     }
     
@@ -178,8 +186,8 @@ private struct ScanQualityIndicatorView: View {
     
     private var guidanceTextColor: Color {
         switch metrics.indicatorColor {
-        case .green: return .secondary
-        case .yellow: return .orange
+        case .green: return .white.opacity(0.9)
+        case .yellow: return .yellow
         case .red: return .red
         }
     }
@@ -192,6 +200,42 @@ private struct ScanQualityIndicatorView: View {
         } else {
             return .red
         }
+    }
+}
+
+// MARK: - Live volume sidebar
+
+private struct LiveVolumeSidebar: View {
+    let items: [FoodVolumeItem]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if items.isEmpty {
+                Text("אין מזון עדיין")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.85))
+            } else {
+                ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                    HStack(spacing: 8) {
+                        Circle()
+                            .fill(LiveIslandPalette.color(index))
+                            .frame(width: 10, height: 10)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(item.label)
+                                .font(.caption.weight(.semibold))
+                                .lineLimit(1)
+                            Text(String(format: "%.0f מ״ל", item.volumeMl))
+                                .font(.caption.monospacedDigit())
+                        }
+                        Spacer(minLength: 0)
+                    }
+                }
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.black.opacity(0.58), in: RoundedRectangle(cornerRadius: 12))
+        .foregroundStyle(.white)
     }
 }
 
@@ -234,11 +278,16 @@ private struct FoodARSCNView: UIViewRepresentable {
 final class FoodLiDARCaptureModel: ObservableObject {
     @Published private(set) var isReady = false
     @Published private(set) var liveQuality: ScanQualityAnalyzer.LiveMetrics?
+    @Published private(set) var liveOverlay: UIImage?
+    @Published private(set) var liveVolumeItems: [FoodVolumeItem] = []
 
     private(set) weak var session: ARSession?
     private var latestFrame: ARFrame?
     private var lastQualityUpdate: Date = .distantPast
     private let qualityUpdateInterval: TimeInterval = 0.15
+    private var lastLiveAnalysis: Date = .distantPast
+    private let liveAnalysisInterval: TimeInterval = 0.45
+    private var isLiveAnalysisRunning = false
 
     static var isLiDARSupported: Bool {
         ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth)
@@ -266,6 +315,7 @@ final class FoodLiDARCaptureModel: ObservableObject {
             lastQualityUpdate = now
             updateLiveQuality(depthBuffer: sceneDepth.depthMap)
         }
+        maybeRunLiveVolumeAnalysis(frame: frame, now: now)
     }
     
     private func updateLiveQuality(depthBuffer: CVPixelBuffer) {
@@ -280,21 +330,132 @@ final class FoodLiDARCaptureModel: ObservableObject {
         )
     }
 
+    private func maybeRunLiveVolumeAnalysis(frame: ARFrame, now: Date) {
+        guard !isLiveAnalysisRunning else { return }
+        guard now.timeIntervalSince(lastLiveAnalysis) >= liveAnalysisInterval else { return }
+        guard let snapshot = try? Self.makeSnapshot(from: frame) else { return }
+
+        isLiveAnalysisRunning = true
+        lastLiveAnalysis = now
+        Task {
+            let segmented: FoodItemVolumeSegmenter.Output?
+            do {
+                segmented = try await FoodItemVolumeSegmenter.analyze(
+                    colorImage: snapshot.colorSensor,
+                    depthMeters: snapshot.depthMeters,
+                    depthWidth: snapshot.depthWidth,
+                    depthHeight: snapshot.depthHeight,
+                    intrinsics: snapshot.intrinsics
+                )
+            } catch {
+                segmented = nil
+            }
+            let overlay = segmented.flatMap {
+                LiveIslandOverlayRenderer.render(
+                    labelMap: $0.islandLabelMap,
+                    width: $0.depthWidth,
+                    height: $0.depthHeight,
+                    displayOriented: true
+                )
+            }
+            let items = segmented?.items.filter { !FoodTablewareLexicon.isNonFood($0.label) } ?? []
+            await MainActor.run {
+                self.isLiveAnalysisRunning = false
+                if segmented != nil {
+                    self.liveVolumeItems = items
+                    self.liveOverlay = overlay
+                }
+            }
+        }
+    }
+
     func captureFoodVolume() async throws -> FoodDepthCaptureResult {
         guard Self.isLiDARSupported else { throw FoodLiDARCaptureError.unsupported }
         guard let frame = latestFrame else { throw FoodLiDARCaptureError.noFrame }
+        let snapshot = try Self.makeSnapshot(from: frame)
+
+        let segmented: FoodItemVolumeSegmenter.Output
+        do {
+            segmented = try await FoodItemVolumeSegmenter.analyze(
+                colorImage: snapshot.colorSensor,
+                depthMeters: snapshot.depthMeters,
+                depthWidth: snapshot.depthWidth,
+                depthHeight: snapshot.depthHeight,
+                intrinsics: snapshot.intrinsics
+            )
+        } catch {
+            segmented = FoodItemVolumeSegmenter.Output(
+                items: [],
+                sceneClassifications: [],
+                tableDetected: false,
+                combinedFoodMask01: nil,
+                islandLabelMap: nil,
+                depthWidth: snapshot.depthWidth,
+                depthHeight: snapshot.depthHeight
+            )
+        }
+
+        let totalFoodPixels = segmented.items.reduce(0) { $0 + $1.foodPixelCount }
+        let scanQuality = ScanQualityAnalyzer.analyzeCapture(
+            depthMeters: snapshot.depthMeters,
+            width: snapshot.depthWidth,
+            height: snapshot.depthHeight,
+            intrinsics: snapshot.intrinsics,
+            foodPixelCount: totalFoodPixels
+        )
+
+        let heightDebugImage = FoodVolumeHeightDebugRenderer.render(
+            depthMeters: snapshot.depthMeters,
+            width: snapshot.depthWidth,
+            height: snapshot.depthHeight,
+            intrinsics: snapshot.intrinsics,
+            mask01: segmented.combinedFoodMask01
+        )
+
+        let debugURL = FoodVolumeScanDebugStore.saveCaptureIfPossible(
+            .init(
+                colorImage: snapshot.colorDisplay,
+                colorSensorImage: snapshot.colorSensor,
+                depthMeters: snapshot.depthMeters,
+                depthWidth: snapshot.depthWidth,
+                depthHeight: snapshot.depthHeight,
+                intrinsics: snapshot.intrinsics,
+                segmented: segmented,
+                scanQuality: scanQuality,
+                heightDebugImage: heightDebugImage
+            )
+        )
+
+        return FoodDepthCaptureResult(
+            colorImage: snapshot.colorDisplay,
+            items: segmented.items,
+            visionLabels: segmented.sceneClassifications,
+            tableDetected: segmented.tableDetected,
+            scanQuality: scanQuality,
+            debugScanDirectoryURL: debugURL,
+            heightDebugImage: heightDebugImage
+        )
+    }
+
+    private struct CaptureSnapshot {
+        var colorSensor: UIImage
+        var colorDisplay: UIImage
+        var depthMeters: [Float]
+        var depthWidth: Int
+        var depthHeight: Int
+        var intrinsics: FoodVolumeEstimator.Intrinsics
+    }
+
+    /// Sensor-frame RGB matches `sceneDepth` / intrinsics (landscape buffer).
+    /// Display-oriented RGB is only for UI / AI photo — never for mask↔depth.
+    private static func makeSnapshot(from frame: ARFrame) throws -> CaptureSnapshot {
         guard let sceneDepth = frame.sceneDepth else { throw FoodLiDARCaptureError.noDepth }
-
-        // Sensor-frame RGB matches `sceneDepth` / intrinsics (landscape buffer).
-        // Display-oriented RGB is only for UI / AI photo — never for mask↔depth.
-        let colorSensor = try Self.uiImage(from: frame.capturedImage, displayOriented: false)
-        let colorDisplay = try Self.uiImage(from: frame.capturedImage, displayOriented: true)
-
+        let colorSensor = try uiImage(from: frame.capturedImage, displayOriented: false)
+        let colorDisplay = try uiImage(from: frame.capturedImage, displayOriented: true)
         let depthBuffer = sceneDepth.depthMap
         let depthW = CVPixelBufferGetWidth(depthBuffer)
         let depthH = CVPixelBufferGetHeight(depthBuffer)
-        let depth = Self.floatDepthMeters(from: depthBuffer)
-
+        let depth = floatDepthMeters(from: depthBuffer)
         let colorW = CVPixelBufferGetWidth(frame.capturedImage)
         let colorH = CVPixelBufferGetHeight(frame.capturedImage)
         let sx = Float(depthW) / Float(max(colorW, 1))
@@ -306,58 +467,13 @@ final class FoodLiDARCaptureModel: ObservableObject {
             cx: m.columns.2.x * sx,
             cy: m.columns.2.y * sy
         )
-
-        let segmented = try await FoodItemVolumeSegmenter.analyze(
-            colorImage: colorSensor,
+        return CaptureSnapshot(
+            colorSensor: colorSensor,
+            colorDisplay: colorDisplay,
             depthMeters: depth,
             depthWidth: depthW,
             depthHeight: depthH,
             intrinsics: K
-        )
-        guard !segmented.items.isEmpty else {
-            throw FoodVolumeEstimator.EstimateError.noFoodPixels
-        }
-        
-        // Compute scan quality assessment
-        let totalFoodPixels = segmented.items.reduce(0) { $0 + $1.foodPixelCount }
-        let scanQuality = ScanQualityAnalyzer.analyzeCapture(
-            depthMeters: depth,
-            width: depthW,
-            height: depthH,
-            intrinsics: K,
-            foodPixelCount: totalFoodPixels
-        )
-
-        let heightDebugImage = FoodVolumeHeightDebugRenderer.render(
-            depthMeters: depth,
-            width: depthW,
-            height: depthH,
-            intrinsics: K,
-            mask01: segmented.combinedFoodMask01
-        )
-
-        let debugURL = FoodVolumeScanDebugStore.saveCaptureIfPossible(
-            .init(
-                colorImage: colorDisplay,
-                colorSensorImage: colorSensor,
-                depthMeters: depth,
-                depthWidth: depthW,
-                depthHeight: depthH,
-                intrinsics: K,
-                segmented: segmented,
-                scanQuality: scanQuality,
-                heightDebugImage: heightDebugImage
-            )
-        )
-
-        return FoodDepthCaptureResult(
-            colorImage: colorDisplay,
-            items: segmented.items,
-            visionLabels: segmented.sceneClassifications,
-            tableDetected: segmented.tableDetected,
-            scanQuality: scanQuality,
-            debugScanDirectoryURL: debugURL,
-            heightDebugImage: heightDebugImage
         )
     }
 
@@ -409,6 +525,91 @@ enum FoodLiDARCaptureError: LocalizedError {
         case .unsupported:
             return "המכשיר לא תומך ב־LiDAR scene depth."
         }
+    }
+}
+
+// MARK: - Live island overlay
+
+enum LiveIslandPalette {
+    private static let rgbValues: [(UInt8, UInt8, UInt8)] = [
+        (0, 210, 255),
+        (255, 70, 170),
+        (255, 210, 0),
+        (50, 230, 110),
+        (255, 130, 40),
+        (170, 90, 255),
+    ]
+
+    static func rgb(_ index: Int) -> (UInt8, UInt8, UInt8) {
+        rgbValues[index % rgbValues.count]
+    }
+
+    static func color(_ index: Int) -> Color {
+        let (r, g, b) = rgb(index)
+        return Color(
+            red: Double(r) / 255,
+            green: Double(g) / 255,
+            blue: Double(b) / 255
+        )
+    }
+}
+
+enum LiveIslandOverlayRenderer {
+    static func render(
+        labelMap: [UInt8]?,
+        width: Int,
+        height: Int,
+        displayOriented: Bool
+    ) -> UIImage? {
+        guard width > 0, height > 0, let labelMap, labelMap.count == width * height else { return nil }
+        guard labelMap.contains(where: { $0 != 0 }) else { return nil }
+
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        let fillA: UInt8 = 110
+        for v in 0 ..< height {
+            for u in 0 ..< width {
+                let i = v * width + u
+                let label = labelMap[i]
+                guard label > 0 else { continue }
+                let (r, g, b) = LiveIslandPalette.rgb(Int(label) - 1)
+                let edge =
+                    (u == 0 || labelMap[i - 1] != label)
+                    || (u == width - 1 || labelMap[i + 1] != label)
+                    || (v == 0 || labelMap[i - width] != label)
+                    || (v == height - 1 || labelMap[i + width] != label)
+                let o = i * 4
+                let a: UInt8 = edge ? 230 : fillA
+                pixels[o] = UInt8((Int(r) * Int(a)) / 255)
+                pixels[o + 1] = UInt8((Int(g) * Int(a)) / 255)
+                pixels[o + 2] = UInt8((Int(b) * Int(a)) / 255)
+                pixels[o + 3] = a
+            }
+        }
+
+        let data = Data(pixels)
+        guard let provider = CGDataProvider(data: data as CFData) else { return nil }
+        guard let cg = CGImage(
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bitsPerPixel: 32,
+            bytesPerRow: width * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+            provider: provider,
+            decode: nil,
+            shouldInterpolate: false,
+            intent: .defaultIntent
+        ) else { return nil }
+        if displayOriented {
+            let oriented = CIImage(cgImage: cg).oriented(.right)
+            let ctx = CIContext(options: [.useSoftwareRenderer: false])
+            guard let rotated = ctx.createCGImage(oriented, from: oriented.extent) else {
+                return UIImage(cgImage: cg)
+            }
+            return UIImage(cgImage: rotated, scale: 1, orientation: .up)
+        }
+        return UIImage(cgImage: cg, scale: 1, orientation: .up)
     }
 }
 

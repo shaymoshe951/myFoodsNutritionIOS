@@ -19,6 +19,14 @@ enum FoodVolumeEstimator {
         var medianHeightCm: Double
         var maxHeightCm: Double
         var foodPixelCount: Int
+        /// True if any contributing pixel is on the depth-map border (box wall / lid).
+        var touchesImageBorder: Bool
+    }
+
+    struct Island: Equatable {
+        var result: Result
+        /// Depth-grid indices (`v * width + u`) contributing to this island.
+        var pixelIndices: [Int]
     }
 
     enum EstimateError: LocalizedError {
@@ -38,13 +46,23 @@ enum FoodVolumeEstimator {
         }
     }
 
+    /// One contributing depth pixel (quad origin) after mask + height gates.
+    private struct Contrib {
+        var u: Int
+        var v: Int
+        var height: Float
+        var volumeM3: Float
+        var footPoint: SIMD3<Float>
+    }
+
     /// - Parameters:
     ///   - depthMeters: row-major depth in meters; non-finite / ≤0 ignored.
     ///   - width/height: depth map size.
     ///   - mask01: optional soft mask same size (values in 0...1). If nil, uses height threshold only.
     ///   - maskThreshold: minimum mask value to include a pixel when mask is provided.
     ///   - minHeightMeters: food must be at least this high above the table.
-    static func estimateVolume(
+    ///   - minIslandPixels: drop connected fragments smaller than this. Island split runs only when `mask01` is set.
+    static func estimateVolumeIslands(
         depthMeters: [Float],
         width: Int,
         height: Int,
@@ -52,9 +70,10 @@ enum FoodVolumeEstimator {
         mask01: [Float]? = nil,
         maskThreshold: Float = 0.35,
         minHeightMeters: Float = 0.008,
+        minIslandPixels: Int = 16,
         ransacIterations: Int = 120,
         planeInlierMeters: Float = 0.005
-    ) throws -> Result {
+    ) throws -> [Island] {
         precondition(depthMeters.count == width * height)
         if let mask01 {
             precondition(mask01.count == width * height)
@@ -86,11 +105,8 @@ enum FoodVolumeEstimator {
             plane.d = -plane.d
         }
 
-        var volumeM3: Float = 0
-        var heights: [Float] = []
-        var foodPoints: [SIMD3<Float>] = []
-        heights.reserveCapacity(1024)
-        foodPoints.reserveCapacity(1024)
+        var contribs: [Contrib] = []
+        contribs.reserveCapacity(1024)
 
         for v in 0 ..< (height - 1) {
             for u in 0 ..< (width - 1) {
@@ -112,28 +128,29 @@ enum FoodVolumeEstimator {
                 let area = length(cross(b - a, c - a))
                 guard area.isFinite, area > 0 else { continue }
 
-                volumeM3 += area * h
-                heights.append(h)
-                foodPoints.append(a)
+                contribs.append(
+                    Contrib(u: u, v: v, height: h, volumeM3: area * h, footPoint: a)
+                )
             }
         }
 
-        guard !heights.isEmpty, volumeM3 > 0 else { throw EstimateError.noFoodPixels }
+        guard !contribs.isEmpty else { throw EstimateError.noFoodPixels }
 
-        heights.sort()
-        let medianH = heights[heights.count / 2]
-        let maxH = heights.last ?? medianH
+        // Height islands only when a Vision instance mask labeled the region.
+        if mask01 == nil {
+            return [islandFromContribs(contribs, width: width, height: height)]
+        }
 
-        let (footW, footL) = footprintMeters(foodPoints)
-
-        return Result(
-            volumeMl: Double(volumeM3) * 1_000_000.0,
-            footprintWidthCm: Double(min(footW, footL)) * 100.0,
-            footprintLengthCm: Double(max(footW, footL)) * 100.0,
-            medianHeightCm: Double(medianH) * 100.0,
-            maxHeightCm: Double(maxH) * 100.0,
-            foodPixelCount: heights.count
-        )
+        let groups = connectedComponents(contribs, width: width, height: height)
+        var islands: [Island] = []
+        islands.reserveCapacity(groups.count)
+        for members in groups {
+            guard members.count >= minIslandPixels else { continue }
+            islands.append(islandFromContribs(members.map { contribs[$0] }, width: width, height: height))
+        }
+        guard !islands.isEmpty else { throw EstimateError.noFoodPixels }
+        islands.sort { $0.result.volumeMl > $1.result.volumeMl }
+        return islands
     }
 
     // MARK: - Plane
@@ -260,6 +277,81 @@ enum FoodVolumeEstimator {
         let x = (Float(u) - K.cx) * z / K.fx
         let y = (Float(v) - K.cy) * z / K.fy
         return SIMD3(x, y, z)
+    }
+
+    private static func connectedComponents(
+        _ contribs: [Contrib],
+        width: Int,
+        height: Int
+    ) -> [[Int]] {
+        var grid = [Int](repeating: -1, count: width * height)
+        for (idx, c) in contribs.enumerated() {
+            grid[c.v * width + c.u] = idx
+        }
+        var seen = [Bool](repeating: false, count: contribs.count)
+        var islands: [[Int]] = []
+        islands.reserveCapacity(4)
+        for start in contribs.indices where !seen[start] {
+            var stack = [start]
+            seen[start] = true
+            var members: [Int] = []
+            members.reserveCapacity(64)
+            while let cur = stack.popLast() {
+                members.append(cur)
+                let u = contribs[cur].u
+                let v = contribs[cur].v
+                let neighbors = [(u - 1, v), (u + 1, v), (u, v - 1), (u, v + 1)]
+                for (nu, nv) in neighbors {
+                    guard nu >= 0, nv >= 0, nu < width, nv < height else { continue }
+                    let gi = grid[nv * width + nu]
+                    if gi >= 0, !seen[gi] {
+                        seen[gi] = true
+                        stack.append(gi)
+                    }
+                }
+            }
+            islands.append(members)
+        }
+        return islands
+    }
+
+    private static func islandFromContribs(_ contribs: [Contrib], width: Int, height: Int) -> Island {
+        Island(
+            result: resultFromContribs(contribs, width: width, height: height),
+            pixelIndices: contribs.map { $0.v * width + $0.u }
+        )
+    }
+
+    private static func resultFromContribs(_ contribs: [Contrib], width: Int, height: Int) -> Result {
+        var volumeM3: Float = 0
+        var heights: [Float] = []
+        var foodPoints: [SIMD3<Float>] = []
+        heights.reserveCapacity(contribs.count)
+        foodPoints.reserveCapacity(contribs.count)
+        var touches = false
+        let maxU = width - 2
+        let maxV = height - 2
+        for c in contribs {
+            volumeM3 += c.volumeM3
+            heights.append(c.height)
+            foodPoints.append(c.footPoint)
+            if c.u == 0 || c.v == 0 || c.u >= maxU || c.v >= maxV {
+                touches = true
+            }
+        }
+        heights.sort()
+        let medianH = heights[heights.count / 2]
+        let maxH = heights.last ?? medianH
+        let (footW, footL) = footprintMeters(foodPoints)
+        return Result(
+            volumeMl: Double(volumeM3) * 1_000_000.0,
+            footprintWidthCm: Double(min(footW, footL)) * 100.0,
+            footprintLengthCm: Double(max(footW, footL)) * 100.0,
+            medianHeightCm: Double(medianH) * 100.0,
+            maxHeightCm: Double(maxH) * 100.0,
+            foodPixelCount: heights.count,
+            touchesImageBorder: touches
+        )
     }
 
     private static func footprintMeters(_ points: [SIMD3<Float>]) -> (Float, Float) {

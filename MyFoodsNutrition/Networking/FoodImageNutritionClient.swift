@@ -12,13 +12,18 @@ struct FoodImageOnDeviceHints: Equatable {
         var label: String
         var confidence: Float
         var volumeMl: Double
+        var footprintLengthCm: Double
+        var footprintWidthCm: Double
+        var medianHeightCm: Double
+        var foodPixelCount: Int
+        var touchesImageBorder: Bool
     }
 
     var visionLabels: [LabelHint]
     var tableDetected: Bool?
-    /// Preferred: one entry per edible instance (plate/bowl excluded).
+    /// Raw LiDAR height islands (food plus possible box/plate/walls).
     var volumeItems: [VolumeItemHint]
-    /// Legacy single-blob fields (sum / first item) for older UI paths.
+    /// Set only when there is a single island, so the model does not sum candidates.
     var volumeMl: Double?
 
     var isEmpty: Bool {
@@ -36,15 +41,19 @@ struct FoodImageOnDeviceHints: Equatable {
             VolumeItemHint(
                 label: $0.label,
                 confidence: $0.labelConfidence,
-                volumeMl: $0.volumeMl
+                volumeMl: $0.volumeMl,
+                footprintLengthCm: $0.footprintLengthCm,
+                footprintWidthCm: $0.footprintWidthCm,
+                medianHeightCm: $0.medianHeightCm,
+                foodPixelCount: $0.foodPixelCount,
+                touchesImageBorder: $0.touchesImageBorder
             )
         }
-        let totalMl = output.items.reduce(0.0) { $0 + $1.volumeMl }
         return FoodImageOnDeviceHints(
             visionLabels: labels,
             tableDetected: output.tableDetected,
             volumeItems: items,
-            volumeMl: totalMl > 0 ? totalMl : nil
+            volumeMl: items.count == 1 ? items[0].volumeMl : nil
         )
     }
 }
@@ -172,7 +181,7 @@ struct FoodImageNutritionClient {
     private static let systemPrompt = """
     You are a nutrition estimation assistant for a Hebrew food diary app.
     Identify edible foods in the photo and estimate nutrition **per 100 grams** for each distinct food.
-    Ignore plates, bowls, utensils, and the table — they are not food diary items.
+    Ignore plates, bowls, utensils, pizza boxes, cartons, and the table — they are not food diary items.
     Prefer Hebrew food names when the food is commonly named in Hebrew.
     Return ONLY a JSON object with this shape:
     {
@@ -188,7 +197,7 @@ struct FoodImageNutritionClient {
       ]
     }
     quantity_grams is the edible portion weight in grams for that item.
-    If on-device volume_items are provided, return one output item per volume_item (same order). Use each measured volume_ml together with the image (and food type) to estimate quantity_grams yourself — do not assume a fixed density from the app. Echo volume_ml and improve the food name from the image.
+    If on-device volume_items are provided, they are RAW height-island candidates — food plus possible box/plate/walls. Using the photo, keep only edible food. Return one output item per kept candidate and echo that candidate's volume_ml. Do not output a row for container/box/plate/table/wall candidates. Do not return one row per candidate unless that candidate is edible. Do not sum candidate volumes. Candidates that touch the image border or have a footprint much larger than the visible food are often container walls, not food. Use each kept volume_ml together with the image (and food type) to estimate quantity_grams yourself — do not assume a fixed density from the app. Improve the food name from the image.
     If only a single food is present, still return an "items" array with one element.
     nutrients_per_100g must use the exact nutrient keys requested by the user.
     energy is kcal per 100 g. macronutrients (protein, carbohydrate, total_lipid_fat, dietary_fiber) are grams per 100 g.
@@ -204,10 +213,10 @@ struct FoodImageNutritionClient {
     ) -> String {
         let keysList = nutrientKeys.joined(separator: ", ")
         var parts: [String] = [
-            "Estimate nutrition for edible food in this image (exclude plate/bowl/utensils).",
+            "Estimate nutrition for edible food in this image (exclude plate/bowl/utensils/box/carton).",
             "Detail level: \(detailLevel.rawValue).",
             "Include nutrients_per_100g for exactly these keys: \(keysList).",
-            "Estimate quantity_grams for each item from the image; when volume_ml is provided per label, use that measured volume to inform your weight estimate.",
+            "Estimate quantity_grams for each edible item from the image. If you keep a volume_item, use that candidate's volume_ml for the weight — do not sum unused candidates.",
         ]
         let extra = optionalPrompt?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if !extra.isEmpty {
@@ -219,10 +228,10 @@ struct FoodImageNutritionClient {
                 parts.append("- table_detected_by_vision: \(table)")
             }
             if !hints.volumeItems.isEmpty {
-                parts.append("- volume_items (plate/bowl already excluded when possible):")
+                parts.append("- volume_items (raw LiDAR height islands; keep edible food only, do not sum):")
                 for (i, it) in hints.volumeItems.enumerated() {
                     parts.append(
-                        "  \(i + 1). label=\(it.label) conf=\(String(format: "%.2f", it.confidence)) volume_ml=\(String(format: "%.1f", it.volumeMl))"
+                        "  \(i + 1). label=\(it.label) conf=\(String(format: "%.2f", it.confidence)) volume_ml=\(String(format: "%.1f", it.volumeMl)) footprint_cm=\(String(format: "%.1f", it.footprintLengthCm))x\(String(format: "%.1f", it.footprintWidthCm)) median_height_cm=\(String(format: "%.1f", it.medianHeightCm)) pixels=\(it.foodPixelCount) touches_image_border=\(it.touchesImageBorder)"
                     )
                 }
             } else if let v = hints.volumeMl {

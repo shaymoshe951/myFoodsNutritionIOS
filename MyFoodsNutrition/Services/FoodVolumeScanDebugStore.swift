@@ -353,6 +353,7 @@ private struct VolumeItemDTO: Encodable {
     var footprintWidthCm: Double
     var medianHeightCm: Double
     var foodPixelCount: Int
+    var touchesImageBorder: Bool
 
     init(_ item: FoodVolumeItem) {
         id = item.id
@@ -363,6 +364,7 @@ private struct VolumeItemDTO: Encodable {
         footprintWidthCm = item.footprintWidthCm
         medianHeightCm = item.medianHeightCm
         foodPixelCount = item.foodPixelCount
+        touchesImageBorder = item.touchesImageBorder
     }
 }
 
@@ -381,7 +383,16 @@ private struct HintsDTO: Encodable {
         visionLabels = hints.visionLabels.map { LabelHintDTO(id: $0.id, confidence: $0.confidence) }
         tableDetected = hints.tableDetected
         volumeItems = hints.volumeItems.map {
-            VolumeItemHintDTO(label: $0.label, confidence: $0.confidence, volumeMl: $0.volumeMl)
+            VolumeItemHintDTO(
+                label: $0.label,
+                confidence: $0.confidence,
+                volumeMl: $0.volumeMl,
+                footprintLengthCm: $0.footprintLengthCm,
+                footprintWidthCm: $0.footprintWidthCm,
+                medianHeightCm: $0.medianHeightCm,
+                foodPixelCount: $0.foodPixelCount,
+                touchesImageBorder: $0.touchesImageBorder
+            )
         }
         volumeMl = hints.volumeMl
     }
@@ -396,6 +407,11 @@ private struct VolumeItemHintDTO: Encodable {
     var label: String
     var confidence: Float
     var volumeMl: Double
+    var footprintLengthCm: Double
+    var footprintWidthCm: Double
+    var medianHeightCm: Double
+    var foodPixelCount: Int
+    var touchesImageBorder: Bool
 }
 
 private struct NutritionResultDTO: Encodable {

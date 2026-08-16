@@ -63,8 +63,12 @@ enum FoodItemVolumeSegmenter {
             throw VisionFoodSceneError.invalidImage
         }
         let orientation = CGImagePropertyOrientation(colorImage.imageOrientation)
+        let t0 = CFAbsoluteTimeGetCurrent()
+        let rgbW = cgImage.width
+        let rgbH = cgImage.height
 
-        return try await Task.detached(priority: priority) {
+        do {
+        let output = try await Task.detached(priority: priority) {
             let handler = VNImageRequestHandler(cgImage: cgImage, orientation: orientation, options: [:])
             let classifyScene = VNClassifyImageRequest()
             let segment = VNGenerateForegroundInstanceMaskRequest()
@@ -198,6 +202,12 @@ enum FoodItemVolumeSegmenter {
                 depthHeight: depthHeight
             )
         }.value
+            AppLog.lidar.info("\(String(format: "analyze %.1fms rgb=%dx%d depth=%dx%d items=%d", (CFAbsoluteTimeGetCurrent() - t0) * 1000, rgbW, rgbH, depthWidth, depthHeight, output.items.count), privacy: .public)")
+            return output
+        } catch {
+            AppLog.lidar.info("\(String(format: "analyze failed %.1fms rgb=%dx%d depth=%dx%d", (CFAbsoluteTimeGetCurrent() - t0) * 1000, rgbW, rgbH, depthWidth, depthHeight), privacy: .public)")
+            throw error
+        }
     }
 
     // MARK: - Helpers

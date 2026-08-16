@@ -6,6 +6,7 @@ enum AppLog {
     private static let subsystem = Bundle.main.bundleIdentifier ?? "MyFoodsNutrition"
     static let api = Logger(subsystem: subsystem, category: "API")
     static let sync = Logger(subsystem: subsystem, category: "Sync")
+    static let lidar = Logger(subsystem: subsystem, category: "LiDAR")
 }
 
 /// Talks to PHP API: `POST {base}/sync/push.php`, `GET {base}/sync/pull.php?since_id=`.

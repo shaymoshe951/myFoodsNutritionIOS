@@ -468,7 +468,7 @@ final class FoodLiDARLiveEngine: @unchecked Sendable {
     private var isLiveAnalysisRunning = false
     private var didMarkReady = false
     private let qualityUpdateInterval: TimeInterval = 0.15
-    private let liveAnalysisInterval: TimeInterval = 0.45
+    private let liveAnalysisInterval: TimeInterval = 0.20
     private let queue = DispatchQueue(label: "food.lidar.live", qos: .userInitiated)
 
     func currentFrame() -> ARFrame? {
@@ -533,10 +533,16 @@ final class FoodLiDARLiveEngine: @unchecked Sendable {
     private func runLive(_ frame: ARFrame) {
         Task.detached(priority: .utility) { [weak self] in
             guard let self else { return }
+            let t0 = CFAbsoluteTimeGetCurrent()
             defer { self.finishLive() }
-            guard let snapshot = try? FoodLiDARFrameIO.makeSensorSnapshot(from: frame) else { return }
+            guard let snapshot = try? FoodLiDARFrameIO.makeSensorSnapshot(from: frame) else {
+                AppLog.lidar.info("\(String(format: "runLive aborted (no snapshot) %.1fms", (CFAbsoluteTimeGetCurrent() - t0) * 1000), privacy: .public)")
+                return
+            }
             // Live Vision only: shrink RGB. Volume still uses full-resolution depth.
             let liveColor = FoodLiDARFrameIO.downscaledForLive(snapshot.colorSensor)
+            let rgbW = liveColor.cgImage?.width ?? 0
+            let rgbH = liveColor.cgImage?.height ?? 0
 
             let segmented: FoodItemVolumeSegmenter.Output?
             do {
@@ -560,6 +566,7 @@ final class FoodLiDARLiveEngine: @unchecked Sendable {
                 )
             }
             let items = segmented?.items.filter { !FoodTablewareLexicon.isNonFood($0.label) } ?? []
+            AppLog.lidar.info("\(String(format: "runLive %.1fms rgb=%dx%d depth=%dx%d items=%d", (CFAbsoluteTimeGetCurrent() - t0) * 1000, rgbW, rgbH, snapshot.depthWidth, snapshot.depthHeight, items.count), privacy: .public)")
             await MainActor.run { [weak self] in
                 guard let self, segmented != nil else { return }
                 self.model?.applyLiveOverlay(items: items, overlay: overlay)

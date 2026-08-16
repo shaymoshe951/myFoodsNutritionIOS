@@ -78,6 +78,10 @@ enum FoodVolumeEstimator {
         if let mask01 {
             precondition(mask01.count == width * height)
         }
+        let t0 = CFAbsoluteTimeGetCurrent()
+        defer {
+            AppLog.lidar.info("\(String(format: "estimateVolumeIslands %.1fms %dx%d masked=%@", (CFAbsoluteTimeGetCurrent() - t0) * 1000, width, height, mask01 != nil ? "yes" : "no"), privacy: .public)")
+        }
 
         var points: [SIMD3<Float>] = []
         points.reserveCapacity(width * height / 4)

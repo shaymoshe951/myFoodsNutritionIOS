@@ -75,6 +75,7 @@ struct FoodImageNutritionPayload: Decodable {
 enum FoodImageNutritionError: LocalizedError {
     case notConfigured
     case invalidImage
+    case emptyDescription
     case invalidURL
     case badResponse
     case http(Int, String)
@@ -88,12 +89,14 @@ enum FoodImageNutritionError: LocalizedError {
             return "לא הוגדר מפתח OpenAI. הוסף אותו בהגדרות (או ב־Secrets.plist)."
         case .invalidImage:
             return "לא ניתן לעבד את התמונה."
+        case .emptyDescription:
+            return "נא לתאר את המזון בטקסט, או לבחור תמונה."
         case .invalidURL:
             return "כתובת API של OpenAI לא תקינה."
         case .badResponse:
             return "תגובת שרת לא צפויה מ־OpenAI."
         case let .http(code, preview):
-            return "ניתוח תמונה נכשל (\(code)): \(preview)"
+            return "ניתוח תזונה נכשל (\(code)): \(preview)"
         case .emptyContent:
             return "ה־AI לא החזיר תוכן."
         case let .invalidPayload(msg):

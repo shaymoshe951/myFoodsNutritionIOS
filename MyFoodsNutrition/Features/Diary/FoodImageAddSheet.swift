@@ -2,7 +2,7 @@ import PhotosUI
 import SwiftUI
 import UIKit
 
-/// Pick a food photo, optional hint, run AI nutrition analysis, then confirm add to the diary.
+/// Pick a food photo / volume scan, or describe food in text; run AI nutrition analysis; then confirm add to the diary.
 struct FoodImageAddSheet: View {
     @Environment(\.dismiss) private var dismiss
 
@@ -50,7 +50,7 @@ struct FoodImageAddSheet: View {
                             .frame(maxWidth: .infinity)
                             .clipShape(RoundedRectangle(cornerRadius: 8))
                     } else {
-                        Text("בחרו תמונה של המזון או צלמו.")
+                        Text("בחרו תמונה, צלמו, או תארו את המזון בטקסט.")
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
@@ -88,27 +88,35 @@ struct FoodImageAddSheet: View {
                 }
 
                 Section {
-                    TextField("למשל: חצי מנה, בלי רוטב…", text: $optionalPrompt, axis: .vertical)
-                        .lineLimit(2 ... 4)
-                        .multilineTextAlignment(.leading)
+                    TextField(
+                        selectedImage == nil ? "למשל: קציצות עוף 70 גרם" : "למשל: חצי מנה, בלי רוטב…",
+                        text: $optionalPrompt,
+                        axis: .vertical
+                    )
+                    .lineLimit(2 ... 4)
+                    .multilineTextAlignment(.leading)
                 } header: {
-                    Text("הנחיה ל־AI (אופציונלי)")
+                    Text(selectedImage == nil ? "תיאור המזון" : "הנחיה ל־AI (אופציונלי)")
                 } footer: {
-                    Text("רמת פירוט נוכחית: \(detailLevel.labelHe). ניתן לשנות בהגדרות.")
+                    if selectedImage == nil {
+                        Text("אפשר לנתח מתיאור בלבד, בלי תמונה. רמת פירוט נוכחית: \(detailLevel.labelHe). ניתן לשנות בהגדרות.")
+                    } else {
+                        Text("רמת פירוט נוכחית: \(detailLevel.labelHe). ניתן לשנות בהגדרות.")
+                    }
                 }
 
                 Section {
                     if isAnalyzing {
                         HStack(spacing: 10) {
                             ProgressView()
-                            Text("מנתח תמונה…")
+                            Text(selectedImage == nil ? "מנתח תזונה…" : "מנתח תמונה…")
                                 .foregroundStyle(.secondary)
                         }
                     } else if analysisItems.isEmpty {
-                        Button("נתח תזונה מהתמונה") {
+                        Button(selectedImage == nil ? "נתח תזונה מהטקסט" : "נתח תזונה מהתמונה") {
                             Task { await analyze() }
                         }
-                        .disabled(selectedImage == nil || !ImageNutritionSettings.isConfigured)
+                        .disabled(!canAnalyze)
                     } else {
                         Button(analysisItems.count > 1 ? "הוסף הכל ליומן" : "הוסף ליומן") {
                             commitAdd()
@@ -118,7 +126,7 @@ struct FoodImageAddSheet: View {
                             analysisItems = []
                             Task { await analyze() }
                         }
-                        .disabled(selectedImage == nil || isAnalyzing)
+                        .disabled(!canAnalyze || isAnalyzing)
                     }
                 }
 
@@ -265,7 +273,7 @@ struct FoodImageAddSheet: View {
                     }
                 }
             }
-            .navigationTitle("הוספה מתמונה")
+            .navigationTitle("הוספה עם AI")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -287,6 +295,14 @@ struct FoodImageAddSheet: View {
                 }
             }
         }
+    }
+
+    private var hasFoodDescription: Bool {
+        !optionalPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var canAnalyze: Bool {
+        ImageNutritionSettings.isConfigured && (selectedImage != nil || hasFoodDescription)
     }
 
     private var canCommit: Bool {
@@ -464,6 +480,10 @@ struct FoodImageAddSheet: View {
     }
 
     private func analyze() async {
+        if selectedImage == nil {
+            await analyzeTextOnly()
+            return
+        }
         guard let image = selectedImage,
               let jpeg = FoodImageNutritionClient.jpegData(from: image)
         else {
@@ -495,6 +515,29 @@ struct FoodImageAddSheet: View {
                 results: merged,
                 jpegSentToAPI: jpeg
             )
+        } catch {
+            errorText = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    private func analyzeTextOnly() async {
+        let description = optionalPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !description.isEmpty else {
+            errorText = FoodImageNutritionError.emptyDescription.localizedDescription
+            return
+        }
+        isAnalyzing = true
+        errorText = nil
+        defer { isAnalyzing = false }
+        do {
+            let results = try await FoodImageNutritionClient().analyzeFoodText(
+                description: description,
+                detailLevel: detailLevel,
+                nutrientKeys: nutrientKeysForDetail
+            )
+            analysisItems = results
+            editNames = results.map(\.itemName)
+            editGrams = results.map { String($0.quantityGrams) }
         } catch {
             errorText = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }

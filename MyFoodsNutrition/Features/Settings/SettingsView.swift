@@ -50,7 +50,7 @@ struct SettingsView: View {
                         Text(model.labelHe).tag(model)
                     }
                 }
-                Picker("פירוט תזונה מתמונה", selection: $imageDetailLevel) {
+                Picker("פירוט תזונה", selection: $imageDetailLevel) {
                     ForEach(ImageNutritionDetailLevel.allCases) { level in
                         Text(level.labelHe).tag(level)
                     }
@@ -62,9 +62,9 @@ struct SettingsView: View {
                     savedNotice = true
                 }
             } header: {
-                Text("הוספה מתמונה (AI)")
+                Text("הוספה עם AI")
             } footer: {
-                Text("מודל: \(visionModel.rawValue). \(imageDetailLevel.footerHe) המפתח נשמר במכשיר (או ב־Secrets.plist כ־OpenAIAPIKey). התמונה נשלחת ל־OpenAI לניתוח.")
+                Text("מודל: \(visionModel.rawValue). \(imageDetailLevel.footerHe) המפתח נשמר במכשיר (או ב־Secrets.plist כ־OpenAIAPIKey). תמונה או תיאור טקסט נשלחים ל־OpenAI לניתוח.")
             }
 
             Section {

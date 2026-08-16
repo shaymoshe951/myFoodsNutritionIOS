@@ -58,7 +58,7 @@ struct FoodImageOnDeviceHints: Equatable {
     }
 }
 
-/// Sends a food photo (+ optional prompt) to OpenAI vision and returns structured nutrition per 100 g.
+/// Sends a food photo (+ optional prompt) or a text-only description to OpenAI and returns structured nutrition per 100 g.
 struct FoodImageNutritionClient {
     private let session: URLSession
 
@@ -78,44 +78,90 @@ struct FoodImageNutritionClient {
         let key = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !key.isEmpty else { throw FoodImageNutritionError.notConfigured }
         guard !jpegData.isEmpty else { throw FoodImageNutritionError.invalidImage }
-        guard let url = URL(string: "https://api.openai.com/v1/chat/completions") else {
-            throw FoodImageNutritionError.invalidURL
-        }
 
-        let keys = nutrientKeys.isEmpty
-            ? ImageNutritionSettings.basicNutrientKeys
-            : nutrientKeys
-
+        let keys = Self.resolvedNutrientKeys(nutrientKeys)
         let base64 = jpegData.base64EncodedString()
         let dataURL = "data:image/jpeg;base64,\(base64)"
-        let userText = Self.userPrompt(
+        let userText = Self.imageUserPrompt(
             optionalPrompt: optionalPrompt,
             detailLevel: detailLevel,
             nutrientKeys: keys,
             onDeviceHints: onDeviceHints
         )
-        let modelOption = OpenAIVisionModelOption.fromStoredModelId(model)
+        let userContent: [[String: Any]] = [
+            ["type": "text", "text": userText],
+            [
+                "type": "image_url",
+                "image_url": [
+                    "url": dataURL,
+                    "detail": "high",
+                ] as [String: Any],
+            ],
+        ]
+        return try await performCompletions(
+            systemPrompt: Self.imageSystemPrompt,
+            userContent: userContent,
+            apiKey: key,
+            model: model
+        )
+    }
 
+    func analyzeFoodText(
+        description: String,
+        detailLevel: ImageNutritionDetailLevel,
+        nutrientKeys: [String],
+        apiKey: String = ImageNutritionSettings.openAIAPIKey,
+        model: String = ImageNutritionSettings.visionModel
+    ) async throws -> [FoodImageNutritionResult] {
+        let key = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else { throw FoodImageNutritionError.notConfigured }
+        let text = description.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { throw FoodImageNutritionError.emptyDescription }
+
+        let keys = Self.resolvedNutrientKeys(nutrientKeys)
+        let userText = Self.textUserPrompt(
+            description: text,
+            detailLevel: detailLevel,
+            nutrientKeys: keys
+        )
+        let userContent: [[String: Any]] = [
+            ["type": "text", "text": userText],
+        ]
+        return try await performCompletions(
+            systemPrompt: Self.textSystemPrompt,
+            userContent: userContent,
+            apiKey: key,
+            model: model
+        )
+    }
+
+    static func jpegData(from image: UIImage, maxEdge: CGFloat = 1280, quality: CGFloat = 0.72) -> Data? {
+        let scaled = image.scaledToMaxEdge(maxEdge)
+        return scaled.jpegData(compressionQuality: quality)
+    }
+
+    private func performCompletions(
+        systemPrompt: String,
+        userContent: [[String: Any]],
+        apiKey: String,
+        model: String
+    ) async throws -> [FoodImageNutritionResult] {
+        guard let url = URL(string: "https://api.openai.com/v1/chat/completions") else {
+            throw FoodImageNutritionError.invalidURL
+        }
+
+        let modelOption = OpenAIVisionModelOption.fromStoredModelId(model)
         var body: [String: Any] = [
             "model": modelOption.rawValue,
             "response_format": ["type": "json_object"],
             "messages": [
                 [
                     "role": "system",
-                    "content": Self.systemPrompt,
+                    "content": systemPrompt,
                 ],
                 [
                     "role": "user",
-                    "content": [
-                        ["type": "text", "text": userText],
-                        [
-                            "type": "image_url",
-                            "image_url": [
-                                "url": dataURL,
-                                "detail": "high",
-                            ] as [String: Any],
-                        ] as [String: Any],
-                    ],
+                    "content": userContent,
                 ],
             ],
         ]
@@ -130,7 +176,7 @@ struct FoodImageNutritionClient {
         request.httpMethod = "POST"
         request.timeoutInterval = 120
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let data: Data
@@ -173,12 +219,11 @@ struct FoodImageNutritionClient {
         }
     }
 
-    static func jpegData(from image: UIImage, maxEdge: CGFloat = 1280, quality: CGFloat = 0.72) -> Data? {
-        let scaled = image.scaledToMaxEdge(maxEdge)
-        return scaled.jpegData(compressionQuality: quality)
+    private static func resolvedNutrientKeys(_ nutrientKeys: [String]) -> [String] {
+        nutrientKeys.isEmpty ? ImageNutritionSettings.basicNutrientKeys : nutrientKeys
     }
 
-    private static let systemPrompt = """
+    private static let imageSystemPrompt = """
     You are a nutrition estimation assistant for a Hebrew food diary app.
     Identify edible foods in the photo and estimate nutrition **per 100 grams** for each distinct food.
     Ignore plates, bowls, utensils, pizza boxes, cartons, and the table — they are not food diary items.
@@ -205,7 +250,32 @@ struct FoodImageNutritionClient {
     If unsure, still provide best estimates; do not omit requested keys (use 0 only when truly negligible).
     """
 
-    private static func userPrompt(
+    private static let textSystemPrompt = """
+    You are a nutrition estimation assistant for a Hebrew food diary app.
+    The user describes food in text (no photo). Identify the edible foods and estimate nutrition **per 100 grams** for each distinct food.
+    Prefer Hebrew food names when the food is commonly named in Hebrew.
+    Parse any portion size from the description (grams, milliliters, pieces, cups, tablespoons, household measures such as "חצי מנה") into quantity_grams.
+    If no portion is given, use a typical serving and still return quantity_grams.
+    Return ONLY a JSON object with this shape:
+    {
+      "items": [
+        {
+          "item_name": string,
+          "quantity_grams": number,
+          "nutrients_per_100g": { "<nutrient_key>": number, ... },
+          "notes": string (optional)
+        }
+      ]
+    }
+    quantity_grams is the edible portion weight in grams for that item.
+    If only a single food is present, still return an "items" array with one element.
+    nutrients_per_100g must use the exact nutrient keys requested by the user.
+    energy is kcal per 100 g. macronutrients (protein, carbohydrate, total_lipid_fat, dietary_fiber) are grams per 100 g.
+    Micronutrients use typical food-composition units for that key.
+    If unsure, still provide best estimates; do not omit requested keys (use 0 only when truly negligible).
+    """
+
+    private static func imageUserPrompt(
         optionalPrompt: String?,
         detailLevel: ImageNutritionDetailLevel,
         nutrientKeys: [String],
@@ -243,6 +313,21 @@ struct FoodImageNutritionClient {
             }
         }
         return parts.joined(separator: "\n")
+    }
+
+    private static func textUserPrompt(
+        description: String,
+        detailLevel: ImageNutritionDetailLevel,
+        nutrientKeys: [String]
+    ) -> String {
+        let keysList = nutrientKeys.joined(separator: ", ")
+        return [
+            "Estimate nutrition from this food description (no image).",
+            "Detail level: \(detailLevel.rawValue).",
+            "Include nutrients_per_100g for exactly these keys: \(keysList).",
+            "Parse quantity_grams from the description when a portion is given.",
+            "Food description: \(description)",
+        ].joined(separator: "\n")
     }
 }
 

@@ -21,6 +21,8 @@ struct FoodImageAddSheet: View {
     @State private var analysisItems: [FoodImageNutritionResult] = []
     @State private var editNames: [String] = []
     @State private var editGrams: [String] = []
+    /// Parallel to `analysisItems`; all `true` after analysis. Used when more than one food is returned.
+    @State private var itemSelected: [Bool] = []
     @State private var visionResult: VisionFoodSceneAnalyzer.Result?
     @State private var volumeItems: [FoodVolumeItem] = []
     @State private var tableDetected = false
@@ -118,12 +120,13 @@ struct FoodImageAddSheet: View {
                         }
                         .disabled(!canAnalyze)
                     } else {
-                        Button(analysisItems.count > 1 ? "הוסף הכל ליומן" : "הוסף ליומן") {
+                        Button("הוסף ליומן") {
                             commitAdd()
                         }
                         .disabled(!canCommit)
                         Button("נתח שוב", role: .destructive) {
                             analysisItems = []
+                            itemSelected = []
                             Task { await analyze() }
                         }
                         .disabled(!canAnalyze || isAnalyzing)
@@ -151,46 +154,66 @@ struct FoodImageAddSheet: View {
                 if !analysisItems.isEmpty {
                     Section {
                         ForEach(Array(analysisItems.enumerated()), id: \.offset) { idx, item in
-                            VStack(alignment: .leading, spacing: 8) {
-                                TextField("שם המזון", text: editNameBinding(idx))
-                                    .multilineTextAlignment(.leading)
-                                HStack(spacing: 6) {
-                                    TextField("כמות", text: editGramsBinding(idx))
-                                        .keyboardType(.numberPad)
-                                        .multilineTextAlignment(.leading)
-                                    Text("גרם")
-                                        .foregroundStyle(.secondary)
-                                }
-                                if let totalCal = totalCaloriesText(for: idx, nutrients: item.nutrientsPer100g) {
-                                    Text(totalCal)
-                                        .font(.subheadline.weight(.semibold))
-                                        .foregroundStyle(.primary)
-                                }
-                                if item.volumeMl != nil || item.sourceLabel != nil {
-                                    HStack(spacing: 6) {
-                                        if let label = item.sourceLabel, !label.isEmpty {
-                                            Text("תווית: \(label)")
-                                        }
-                                        if let vol = item.volumeMl {
-                                            Text(String(format: "נפח RGB+D: %.0f מ״ל", vol))
-                                        }
+                            HStack(alignment: .top, spacing: 10) {
+                                if analysisItems.count > 1 {
+                                    Button {
+                                        toggleItemSelected(idx)
+                                    } label: {
+                                        Image(systemName: isItemSelected(idx) ? "checkmark.square.fill" : "square")
+                                            .font(.title3)
+                                            .foregroundStyle(isItemSelected(idx) ? Color.accentColor : Color.secondary)
                                     }
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
+                                    .buttonStyle(.borderless)
+                                    .accessibilityLabel(isItemSelected(idx) ? "נבחר להוספה" : "לא נבחר")
+                                    .accessibilityAddTraits(.isButton)
                                 }
-                                nutrientPreview(item.nutrientsPer100g)
-                                if let notes = item.notes, !notes.isEmpty {
-                                    Text(notes)
-                                        .font(.caption)
+
+                                VStack(alignment: .leading, spacing: 8) {
+                                    TextField("שם המזון", text: editNameBinding(idx))
+                                        .multilineTextAlignment(.leading)
+                                    HStack(spacing: 6) {
+                                        TextField("כמות", text: editGramsBinding(idx))
+                                            .keyboardType(.numberPad)
+                                            .multilineTextAlignment(.leading)
+                                        Text("גרם")
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    if let totalCal = totalCaloriesText(for: idx, nutrients: item.nutrientsPer100g) {
+                                        Text(totalCal)
+                                            .font(.subheadline.weight(.semibold))
+                                            .foregroundStyle(.primary)
+                                    }
+                                    if item.volumeMl != nil || item.sourceLabel != nil {
+                                        HStack(spacing: 6) {
+                                            if let label = item.sourceLabel, !label.isEmpty {
+                                                Text("תווית: \(label)")
+                                            }
+                                            if let vol = item.volumeMl {
+                                                Text(String(format: "נפח RGB+D: %.0f מ״ל", vol))
+                                            }
+                                        }
+                                        .font(.caption2)
                                         .foregroundStyle(.secondary)
+                                    }
+                                    nutrientPreview(item.nutrientsPer100g)
+                                    if let notes = item.notes, !notes.isEmpty {
+                                        Text(notes)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
                                 }
+                                .opacity(analysisItems.count > 1 && !isItemSelected(idx) ? 0.45 : 1)
                             }
                             .padding(.vertical, 4)
                         }
                     } header: {
                         Text(analysisItems.count > 1 ? "תוצאות ניתוח (\(analysisItems.count))" : "תוצאת ניתוח")
                     } footer: {
-                        Text("הערכים הם ל־100 גרם. כל פריט יתווסף ליומן בנפרד.")
+                        if analysisItems.count > 1 {
+                            Text("הערכים הם ל־100 גרם. סמנו אילו פריטים להוסיף ליומן; כל פריט יתווסף בנפרד.")
+                        } else {
+                            Text("הערכים הם ל־100 גרם. כל פריט יתווסף ליומן בנפרד.")
+                        }
                     }
                 }
 
@@ -309,11 +332,24 @@ struct FoodImageAddSheet: View {
         guard !analysisItems.isEmpty, editNames.count == analysisItems.count, editGrams.count == analysisItems.count else {
             return false
         }
+        var anySelected = false
         for i in analysisItems.indices {
+            guard isItemSelected(i) else { continue }
+            anySelected = true
             guard !editNames[i].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
             guard let g = Int(editGrams[i]), g > 0 else { return false }
         }
-        return true
+        return anySelected
+    }
+
+    private func isItemSelected(_ idx: Int) -> Bool {
+        if analysisItems.count <= 1 { return true }
+        return itemSelected.indices.contains(idx) ? itemSelected[idx] : true
+    }
+
+    private func toggleItemSelected(_ idx: Int) {
+        while itemSelected.count <= idx { itemSelected.append(true) }
+        itemSelected[idx].toggle()
     }
 
     private func editNameBinding(_ idx: Int) -> Binding<String> {
@@ -393,6 +429,7 @@ struct FoodImageAddSheet: View {
         analysisItems = []
         editNames = []
         editGrams = []
+        itemSelected = []
         errorText = nil
         visionResult = nil
         if clearVolume {
@@ -410,6 +447,7 @@ struct FoodImageAddSheet: View {
         analysisItems = []
         editNames = []
         editGrams = []
+        itemSelected = []
         errorText = nil
         volumeItems = capture.items
         tableDetected = capture.tableDetected
@@ -506,9 +544,7 @@ struct FoodImageAddSheet: View {
                 onDeviceHints: hints
             )
             let merged = Self.mergeVolumeEstimations(into: results, volumeItems: volumeItems)
-            analysisItems = merged
-            editNames = merged.map(\.itemName)
-            editGrams = merged.map { String($0.quantityGrams) }
+            applyAnalysisResults(merged)
             FoodVolumeScanDebugStore.saveAIAnalysisIfPossible(
                 scanDirectory: debugScanDirectoryURL,
                 hints: hints,
@@ -535,9 +571,7 @@ struct FoodImageAddSheet: View {
                 detailLevel: detailLevel,
                 nutrientKeys: nutrientKeysForDetail
             )
-            analysisItems = results
-            editNames = results.map(\.itemName)
-            editGrams = results.map { String($0.quantityGrams) }
+            applyAnalysisResults(results)
         } catch {
             errorText = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
@@ -564,9 +598,17 @@ struct FoodImageAddSheet: View {
         }
     }
 
+    private func applyAnalysisResults(_ results: [FoodImageNutritionResult]) {
+        analysisItems = results
+        editNames = results.map(\.itemName)
+        editGrams = results.map { String($0.quantityGrams) }
+        itemSelected = Array(repeating: true, count: results.count)
+    }
+
     private func commitAdd() {
         guard canCommit else { return }
         for i in analysisItems.indices {
+            guard isItemSelected(i) else { continue }
             var result = analysisItems[i]
             result.itemName = editNames[i].trimmingCharacters(in: .whitespacesAndNewlines)
             result.quantityGrams = Int(editGrams[i]) ?? result.quantityGrams

@@ -31,28 +31,19 @@ struct FoodLiDARCaptureSheet: View {
     var body: some View {
         NavigationStack {
             ZStack {
+                // Camera stays full-screen and LTR so HUD updates never resize/shift the preview.
                 FoodARSCNView(model: model)
-                if let overlay = model.liveOverlay {
-                    Image(uiImage: overlay)
-                        .resizable()
-                        .interpolation(.none)
-                        .scaledToFill()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .clipped()
-                        .allowsHitTesting(false)
-                }
-            }
-            .ignoresSafeArea()
-            .safeAreaInset(edge: .top, spacing: 8) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        if let quality = model.liveQuality {
-                            ScanQualityIndicatorView(metrics: quality)
-                        }
-                        LiveVolumeSidebar(items: model.liveVolumeItems)
+                    .ignoresSafeArea()
+                    .environment(\.layoutDirection, .leftToRight)
+
+                VStack(spacing: 8) {
+                    if let quality = model.liveQuality {
+                        ScanQualityIndicatorView(metrics: quality)
                     }
-                    .padding(.horizontal, 12)
-                }
-                .safeAreaInset(edge: .bottom, spacing: 8) {
+                    LiveVolumeSidebar(items: model.liveVolumeItems)
+
+                    Spacer(minLength: 0)
+
                     VStack(spacing: 10) {
                         Text("כוונו מעל המזון על שולחן שטוח. נפחים נמדדים לפי איי גובה; ה־AI ישאיר רק מזון (בלי קופסה/צלחת).")
                             .font(.footnote)
@@ -86,9 +77,10 @@ struct FoodLiDARCaptureSheet: View {
                         .buttonStyle(.borderedProminent)
                         .disabled(isProcessing || !model.isReady)
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 16)
                 }
+                .padding(.horizontal, 12)
+                .padding(.bottom, 16)
+            }
             .navigationTitle("סריקת נפח (LiDAR)")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -241,17 +233,60 @@ private struct LiveVolumeSidebar: View {
 
 // MARK: - AR view
 
+/// Hosts `ARSCNView` plus a sibling overlay so island masks stay aligned with the
+/// camera without a SwiftUI `Image` that relayouts the preview.
+private final class FoodARContainerView: UIView {
+    let sceneView = ARSCNView(frame: .zero)
+    let overlayView = UIImageView(frame: .zero)
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        semanticContentAttribute = .forceLeftToRight
+        clipsToBounds = true
+
+        sceneView.semanticContentAttribute = .forceLeftToRight
+        sceneView.clipsToBounds = true
+        sceneView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        sceneView.frame = bounds
+
+        overlayView.semanticContentAttribute = .forceLeftToRight
+        overlayView.contentMode = .scaleAspectFill
+        overlayView.layer.magnificationFilter = .nearest
+        overlayView.layer.minificationFilter = .nearest
+        overlayView.clipsToBounds = true
+        overlayView.isUserInteractionEnabled = false
+        overlayView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        overlayView.frame = bounds
+
+        addSubview(sceneView)
+        addSubview(overlayView)
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        sceneView.frame = bounds
+        overlayView.frame = bounds
+    }
+}
+
 private struct FoodARSCNView: UIViewRepresentable {
     @ObservedObject var model: FoodLiDARCaptureModel
 
-    func makeUIView(context: Context) -> ARSCNView {
-        let view = ARSCNView(frame: .zero)
-        view.delegate = context.coordinator
-        model.attach(session: view.session)
+    func makeUIView(context: Context) -> FoodARContainerView {
+        let view = FoodARContainerView(frame: .zero)
+        view.sceneView.delegate = context.coordinator
+        context.coordinator.overlayView = view.overlayView
+        model.attach(session: view.sceneView.session, sceneView: view.sceneView)
         return view
     }
 
-    func updateUIView(_ uiView: ARSCNView, context: Context) {}
+    func updateUIView(_ uiView: FoodARContainerView, context: Context) {
+        uiView.overlayView.image = model.liveOverlay
+        uiView.overlayView.frame = uiView.bounds
+        model.noteViewportSize(uiView.bounds.size)
+    }
 
     func makeCoordinator() -> Coordinator {
         Coordinator(model: model)
@@ -259,15 +294,19 @@ private struct FoodARSCNView: UIViewRepresentable {
 
     final class Coordinator: NSObject, ARSCNViewDelegate {
         let model: FoodLiDARCaptureModel
-        init(model: FoodLiDARCaptureModel) { self.model = model }
+        let engine: FoodLiDARLiveEngine
+        weak var overlayView: UIImageView?
+        init(model: FoodLiDARCaptureModel) {
+            self.model = model
+            self.engine = model.engine
+        }
 
         func renderer(_ renderer: SCNSceneRenderer, updateAtTime time: TimeInterval) {
             guard let sceneView = renderer as? ARSCNView,
                   let frame = sceneView.session.currentFrame
             else { return }
-            Task { @MainActor in
-                model.handle(frame: frame)
-            }
+            // Render thread: store the frame and schedule work. Do not hop to MainActor every frame.
+            engine.ingest(frame)
         }
     }
 }
@@ -281,20 +320,22 @@ final class FoodLiDARCaptureModel: ObservableObject {
     @Published private(set) var liveOverlay: UIImage?
     @Published private(set) var liveVolumeItems: [FoodVolumeItem] = []
 
+    fileprivate let engine = FoodLiDARLiveEngine()
     private(set) weak var session: ARSession?
-    private var latestFrame: ARFrame?
-    private var lastQualityUpdate: Date = .distantPast
-    private let qualityUpdateInterval: TimeInterval = 0.15
-    private var lastLiveAnalysis: Date = .distantPast
-    private let liveAnalysisInterval: TimeInterval = 0.45
-    private var isLiveAnalysisRunning = false
+    private weak var sceneView: ARSCNView?
+    private var viewportSize: CGSize = .zero
 
     static var isLiDARSupported: Bool {
         ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth)
     }
 
-    func attach(session: ARSession) {
+    init() {
+        engine.model = self
+    }
+
+    func attach(session: ARSession, sceneView: ARSCNView) {
         self.session = session
+        self.sceneView = sceneView
         guard Self.isLiDARSupported else {
             isReady = false
             return
@@ -304,75 +345,33 @@ final class FoodLiDARCaptureModel: ObservableObject {
         session.run(config, options: [.resetTracking, .removeExistingAnchors])
     }
 
-    func handle(frame: ARFrame) {
-        latestFrame = frame
-        isReady = frame.sceneDepth != nil
-        
-        // Update live quality metrics at throttled rate
-        let now = Date()
-        if now.timeIntervalSince(lastQualityUpdate) >= qualityUpdateInterval,
-           let sceneDepth = frame.sceneDepth {
-            lastQualityUpdate = now
-            updateLiveQuality(depthBuffer: sceneDepth.depthMap)
+    func noteViewportSize(_ size: CGSize) {
+        if size.width > 1, size.height > 1 {
+            viewportSize = size
         }
-        maybeRunLiveVolumeAnalysis(frame: frame, now: now)
-    }
-    
-    private func updateLiveQuality(depthBuffer: CVPixelBuffer) {
-        let depthW = CVPixelBufferGetWidth(depthBuffer)
-        let depthH = CVPixelBufferGetHeight(depthBuffer)
-        let depth = Self.floatDepthMeters(from: depthBuffer)
-        
-        liveQuality = ScanQualityAnalyzer.analyzeLive(
-            depthMeters: depth,
-            width: depthW,
-            height: depthH
-        )
     }
 
-    private func maybeRunLiveVolumeAnalysis(frame: ARFrame, now: Date) {
-        guard !isLiveAnalysisRunning else { return }
-        guard now.timeIntervalSince(lastLiveAnalysis) >= liveAnalysisInterval else { return }
-        guard let snapshot = try? Self.makeSnapshot(from: frame) else { return }
+    func markReady() {
+        if !isReady { isReady = true }
+    }
 
-        isLiveAnalysisRunning = true
-        lastLiveAnalysis = now
-        Task {
-            let segmented: FoodItemVolumeSegmenter.Output?
-            do {
-                segmented = try await FoodItemVolumeSegmenter.analyze(
-                    colorImage: snapshot.colorSensor,
-                    depthMeters: snapshot.depthMeters,
-                    depthWidth: snapshot.depthWidth,
-                    depthHeight: snapshot.depthHeight,
-                    intrinsics: snapshot.intrinsics
-                )
-            } catch {
-                segmented = nil
-            }
-            let overlay = segmented.flatMap {
-                LiveIslandOverlayRenderer.render(
-                    labelMap: $0.islandLabelMap,
-                    width: $0.depthWidth,
-                    height: $0.depthHeight,
-                    displayOriented: true
-                )
-            }
-            let items = segmented?.items.filter { !FoodTablewareLexicon.isNonFood($0.label) } ?? []
-            await MainActor.run {
-                self.isLiveAnalysisRunning = false
-                if segmented != nil {
-                    self.liveVolumeItems = items
-                    self.liveOverlay = overlay
-                }
-            }
-        }
+    func applyLiveQuality(_ metrics: ScanQualityAnalyzer.LiveMetrics) {
+        if liveQuality != metrics { liveQuality = metrics }
+    }
+
+    func applyLiveOverlay(items: [FoodVolumeItem], overlay: UIImage?) {
+        liveVolumeItems = items
+        liveOverlay = overlay
     }
 
     func captureFoodVolume() async throws -> FoodDepthCaptureResult {
+        engine.paused = true
+        defer { engine.paused = false }
+
         guard Self.isLiDARSupported else { throw FoodLiDARCaptureError.unsupported }
-        guard let frame = latestFrame else { throw FoodLiDARCaptureError.noFrame }
-        let snapshot = try Self.makeSnapshot(from: frame)
+        guard let frame = engine.currentFrame() else { throw FoodLiDARCaptureError.noFrame }
+        let colorDisplay = try displayImageMatchingLivePreview(from: frame)
+        let snapshot = try FoodLiDARFrameIO.makeSensorSnapshot(from: frame)
 
         let segmented: FoodItemVolumeSegmenter.Output
         do {
@@ -414,7 +413,7 @@ final class FoodLiDARCaptureModel: ObservableObject {
 
         let debugURL = FoodVolumeScanDebugStore.saveCaptureIfPossible(
             .init(
-                colorImage: snapshot.colorDisplay,
+                colorImage: colorDisplay,
                 colorSensorImage: snapshot.colorSensor,
                 depthMeters: snapshot.depthMeters,
                 depthWidth: snapshot.depthWidth,
@@ -427,7 +426,7 @@ final class FoodLiDARCaptureModel: ObservableObject {
         )
 
         return FoodDepthCaptureResult(
-            colorImage: snapshot.colorDisplay,
+            colorImage: colorDisplay,
             items: segmented.items,
             visionLabels: segmented.sceneClassifications,
             tableDetected: segmented.tableDetected,
@@ -437,9 +436,145 @@ final class FoodLiDARCaptureModel: ObservableObject {
         )
     }
 
-    private struct CaptureSnapshot {
+    /// Photo shown after capture must match the live AR preview crop, not the full sensor buffer.
+    private func displayImageMatchingLivePreview(from frame: ARFrame) throws -> UIImage {
+        if let view = sceneView, view.bounds.width > 1, view.bounds.height > 1 {
+            let shot = view.snapshot()
+            if shot.size.width > 1, shot.size.height > 1 {
+                return shot
+            }
+        }
+        let full = try FoodLiDARFrameIO.uiImage(from: frame.capturedImage, displayOriented: true)
+        let aspectSize = viewportSize.width > 1 ? viewportSize : CGSize(width: 3, height: 4)
+        return FoodLiDARFrameIO.centerCropped(full, toAspect: aspectSize.width / max(aspectSize.height, 1))
+    }
+}
+
+// MARK: - Live analysis (off the render / main thread)
+
+/// Copies the latest `ARFrame` from SceneKit and runs quality + Vision/volume on a serial queue.
+final class FoodLiDARLiveEngine: @unchecked Sendable {
+    weak var model: FoodLiDARCaptureModel?
+
+    private let lock = NSLock()
+    private var _paused = false
+    var paused: Bool {
+        get { lock.lock(); defer { lock.unlock() }; return _paused }
+        set { lock.lock(); _paused = newValue; lock.unlock() }
+    }
+    private var latestFrame: ARFrame?
+    private var lastQualityUpdate = Date.distantPast
+    private var lastLiveAnalysis = Date.distantPast
+    private var isLiveAnalysisRunning = false
+    private var didMarkReady = false
+    private let qualityUpdateInterval: TimeInterval = 0.15
+    private let liveAnalysisInterval: TimeInterval = 0.45
+    private let queue = DispatchQueue(label: "food.lidar.live", qos: .userInitiated)
+
+    func currentFrame() -> ARFrame? {
+        lock.lock()
+        defer { lock.unlock() }
+        return latestFrame
+    }
+
+    func ingest(_ frame: ARFrame) {
+        lock.lock()
+        latestFrame = frame
+        if _paused {
+            lock.unlock()
+            return
+        }
+        let now = Date()
+        let shouldMarkReady = !didMarkReady && frame.sceneDepth != nil
+        if shouldMarkReady { didMarkReady = true }
+        let shouldQuality = now.timeIntervalSince(lastQualityUpdate) >= qualityUpdateInterval
+        if shouldQuality { lastQualityUpdate = now }
+        let shouldLive = !isLiveAnalysisRunning && now.timeIntervalSince(lastLiveAnalysis) >= liveAnalysisInterval
+        if shouldLive {
+            lastLiveAnalysis = now
+            isLiveAnalysisRunning = true
+        }
+        lock.unlock()
+
+        if shouldMarkReady {
+            Task { @MainActor [weak self] in
+                self?.model?.markReady()
+            }
+        }
+        if shouldQuality {
+            queue.async { [weak self] in self?.runQuality(frame) }
+        }
+        if shouldLive {
+            queue.async { [weak self] in self?.runLive(frame) }
+        }
+    }
+
+    private func finishLive() {
+        lock.lock()
+        isLiveAnalysisRunning = false
+        lock.unlock()
+    }
+
+    private func runQuality(_ frame: ARFrame) {
+        guard let depthBuffer = frame.sceneDepth?.depthMap else { return }
+        let depthW = CVPixelBufferGetWidth(depthBuffer)
+        let depthH = CVPixelBufferGetHeight(depthBuffer)
+        let depth = FoodLiDARFrameIO.floatDepthMeters(from: depthBuffer)
+        let metrics = ScanQualityAnalyzer.analyzeLive(
+            depthMeters: depth,
+            width: depthW,
+            height: depthH
+        )
+        Task { @MainActor [weak self] in
+            self?.model?.applyLiveQuality(metrics)
+        }
+    }
+
+    private func runLive(_ frame: ARFrame) {
+        Task.detached(priority: .utility) { [weak self] in
+            guard let self else { return }
+            defer { self.finishLive() }
+            guard let snapshot = try? FoodLiDARFrameIO.makeSensorSnapshot(from: frame) else { return }
+            // Live Vision only: shrink RGB. Volume still uses full-resolution depth.
+            let liveColor = FoodLiDARFrameIO.downscaledForLive(snapshot.colorSensor)
+
+            let segmented: FoodItemVolumeSegmenter.Output?
+            do {
+                segmented = try await FoodItemVolumeSegmenter.analyze(
+                    colorImage: liveColor,
+                    depthMeters: snapshot.depthMeters,
+                    depthWidth: snapshot.depthWidth,
+                    depthHeight: snapshot.depthHeight,
+                    intrinsics: snapshot.intrinsics,
+                    priority: .utility
+                )
+            } catch {
+                segmented = nil
+            }
+            let overlay = segmented.flatMap {
+                LiveIslandOverlayRenderer.render(
+                    labelMap: $0.islandLabelMap,
+                    width: $0.depthWidth,
+                    height: $0.depthHeight,
+                    displayOriented: true
+                )
+            }
+            let items = segmented?.items.filter { !FoodTablewareLexicon.isNonFood($0.label) } ?? []
+            await MainActor.run { [weak self] in
+                guard let self, segmented != nil else { return }
+                self.model?.applyLiveOverlay(items: items, overlay: overlay)
+            }
+        }
+    }
+}
+
+// MARK: - Frame I/O (sensor space; not MainActor)
+
+private enum FoodLiDARFrameIO {
+    private static let ciContext = CIContext(options: [.useSoftwareRenderer: false])
+
+    struct SensorSnapshot {
         var colorSensor: UIImage
-        var colorDisplay: UIImage
         var depthMeters: [Float]
         var depthWidth: Int
         var depthHeight: Int
@@ -447,11 +582,9 @@ final class FoodLiDARCaptureModel: ObservableObject {
     }
 
     /// Sensor-frame RGB matches `sceneDepth` / intrinsics (landscape buffer).
-    /// Display-oriented RGB is only for UI / AI photo — never for mask↔depth.
-    private static func makeSnapshot(from frame: ARFrame) throws -> CaptureSnapshot {
+    static func makeSensorSnapshot(from frame: ARFrame) throws -> SensorSnapshot {
         guard let sceneDepth = frame.sceneDepth else { throw FoodLiDARCaptureError.noDepth }
         let colorSensor = try uiImage(from: frame.capturedImage, displayOriented: false)
-        let colorDisplay = try uiImage(from: frame.capturedImage, displayOriented: true)
         let depthBuffer = sceneDepth.depthMap
         let depthW = CVPixelBufferGetWidth(depthBuffer)
         let depthH = CVPixelBufferGetHeight(depthBuffer)
@@ -467,9 +600,8 @@ final class FoodLiDARCaptureModel: ObservableObject {
             cx: m.columns.2.x * sx,
             cy: m.columns.2.y * sy
         )
-        return CaptureSnapshot(
+        return SensorSnapshot(
             colorSensor: colorSensor,
-            colorDisplay: colorDisplay,
             depthMeters: depth,
             depthWidth: depthW,
             depthHeight: depthH,
@@ -479,19 +611,56 @@ final class FoodLiDARCaptureModel: ObservableObject {
 
     /// - Parameter displayOriented: When true, rotates the ARKit buffer for portrait UI
     ///   (`.right`). When false, keeps sensor orientation so RGB aligns with depth.
-    private static func uiImage(from pixelBuffer: CVPixelBuffer, displayOriented: Bool) throws -> UIImage {
+    static func uiImage(from pixelBuffer: CVPixelBuffer, displayOriented: Bool) throws -> UIImage {
         var ci = CIImage(cvPixelBuffer: pixelBuffer)
         if displayOriented {
             ci = ci.oriented(.right)
         }
-        let context = CIContext(options: nil)
-        guard let cg = context.createCGImage(ci, from: ci.extent) else {
+        guard let cg = ciContext.createCGImage(ci, from: ci.extent) else {
             throw FoodLiDARCaptureError.noFrame
         }
         return UIImage(cgImage: cg)
     }
 
-    private static func floatDepthMeters(from buffer: CVPixelBuffer) -> [Float] {
+    static func downscaledForLive(_ image: UIImage, maxLongSide: CGFloat = 960) -> UIImage {
+        guard let cg = image.cgImage else { return image }
+        let width = CGFloat(cg.width)
+        let height = CGFloat(cg.height)
+        let longSide = max(width, height)
+        guard longSide > maxLongSide else { return image }
+        let scale = maxLongSide / longSide
+        let scaled = CIImage(cgImage: cg).transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        let extent = CGRect(x: 0, y: 0, width: (width * scale).rounded(), height: (height * scale).rounded())
+        guard let out = ciContext.createCGImage(scaled, from: extent) else { return image }
+        return UIImage(cgImage: out)
+    }
+
+    static func centerCropped(_ image: UIImage, toAspect aspect: CGFloat) -> UIImage {
+        let size = image.size
+        guard size.width > 0, size.height > 0, aspect > 0 else { return image }
+        let imageAspect = size.width / size.height
+        var crop = CGRect(origin: .zero, size: size)
+        if imageAspect > aspect {
+            crop.size.width = size.height * aspect
+            crop.origin.x = (size.width - crop.size.width) / 2
+        } else if imageAspect < aspect {
+            crop.size.height = size.width / aspect
+            crop.origin.y = (size.height - crop.size.height) / 2
+        } else {
+            return image
+        }
+        let scale = image.scale
+        let pixelCrop = CGRect(
+            x: crop.origin.x * scale,
+            y: crop.origin.y * scale,
+            width: crop.size.width * scale,
+            height: crop.size.height * scale
+        ).integral
+        guard let cg = image.cgImage?.cropping(to: pixelCrop) else { return image }
+        return UIImage(cgImage: cg, scale: scale, orientation: image.imageOrientation)
+    }
+
+    static func floatDepthMeters(from buffer: CVPixelBuffer) -> [Float] {
         CVPixelBufferLockBaseAddress(buffer, .readOnly)
         defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
         let w = CVPixelBufferGetWidth(buffer)

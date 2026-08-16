@@ -56,14 +56,15 @@ enum FoodItemVolumeSegmenter {
         depthMeters: [Float],
         depthWidth: Int,
         depthHeight: Int,
-        intrinsics: FoodVolumeEstimator.Intrinsics
+        intrinsics: FoodVolumeEstimator.Intrinsics,
+        priority: TaskPriority = .userInitiated
     ) async throws -> Output {
         guard let cgImage = colorImage.cgImage else {
             throw VisionFoodSceneError.invalidImage
         }
         let orientation = CGImagePropertyOrientation(colorImage.imageOrientation)
 
-        return try await Task.detached(priority: .userInitiated) {
+        return try await Task.detached(priority: priority) {
             let handler = VNImageRequestHandler(cgImage: cgImage, orientation: orientation, options: [:])
             let classifyScene = VNClassifyImageRequest()
             let segment = VNGenerateForegroundInstanceMaskRequest()
